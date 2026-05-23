@@ -1,0 +1,87 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - gosimple
+    - ineffassign
+    - unused
+    - gosec
+    - revive
+    - gocritic
+    - exhaustive
+    - gofmt
+    - goimports
+    - misspell
+    - unconvert
+    - unparam
+    - bodyclose
+    - noctx
+    - rowserrcheck
+    - sqlclosecheck
+    - exportloopref
+
+linters-settings:
+  govet:
+    enable-all: true
+
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  gosec:
+    excludes:
+      - G115  # integer overflow: acceptable in controlled internal math
+
+  revive:
+    rules:
+      - name: exported
+        arguments:
+          - "checkPrivateReceivers"
+          - "sayRepetitiveInsteadOfStutters"
+      - name: var-naming
+      - name: error-return
+      - name: error-strings
+      - name: if-return
+      - name: increment-decrement
+      - name: range
+      - name: time-naming
+      - name: unexported-return
+      - name: unused-parameter
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    disabled-checks:
+      - hugeParam        # too noisy for domain types
+      - rangeValCopy     # too noisy
+
+  exhaustive:
+    default-signifies-exhaustive: true
+
+  goimports:
+    local-prefixes: github.com/K3y5tr0ke/mcpgate
+
+issues:
+  exclude-rules:
+    # Test files get a relaxed set of rules
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+        - unparam
+    # Migration SQL files are not Go, skip them
+    - path: migrations/
+      linters:
+        - all
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m
+  go: "1.26"

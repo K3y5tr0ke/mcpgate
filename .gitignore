@@ -1,0 +1,31 @@
+bin/
+*.env
+.env
+configs/mcpgate.local.yaml
+*.pem
+*.key
+*.crt
+*.p12
+certs/
+
+# Go
+*.test
+coverage.out
+coverage.html
+
+# Frontend
+web/node_modules/
+web/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# WAL fallback files
+wal/
