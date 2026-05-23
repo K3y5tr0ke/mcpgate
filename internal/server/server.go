@@ -12,29 +12,39 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/K3y5tr0ke/mcpgate/internal/config"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/K3y5tr0ke/mcpgate/internal/admin/api"
+	"github.com/K3y5tr0ke/mcpgate/internal/config"
+	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
+	pgstore "github.com/K3y5tr0ke/mcpgate/internal/store/postgres"
 )
 
 // Server is the main HTTP server wrapping the chi router and all dependencies.
 type Server struct {
-	cfg    *config.Config
-	logger *slog.Logger
-	db     *pgxpool.Pool
-	redis  *redis.Client
-	http   *http.Server
+	cfg          *config.Config
+	logger       *slog.Logger
+	db           *pgxpool.Pool
+	redis        *redis.Client
+	proxyHandler *proxy.Handler
+	adminRouter  *api.Router
+	http         *http.Server
 }
 
 // New builds a Server and wires the router. Call Run to start accepting connections.
 func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient *redis.Client) *Server {
+	serverStore := pgstore.NewServerStore(db)
+
 	s := &Server{
-		cfg:    cfg,
-		logger: logger,
-		db:     db,
-		redis:  redisClient,
+		cfg:          cfg,
+		logger:       logger,
+		db:           db,
+		redis:        redisClient,
+		proxyHandler: proxy.NewHandler(cfg.Proxy, serverStore, logger),
+		adminRouter:  api.NewRouter(serverStore, logger),
 	}
 
 	s.http = &http.Server{
@@ -61,14 +71,15 @@ func (s *Server) buildRouter() http.Handler {
 	r.Get("/health", s.handleHealth)
 	r.Get("/ready", s.handleReady)
 
-	// Placeholder groups — populated in later sprints
-	r.Group(func(r chi.Router) {
-		// Proxy routes: /mcp/{serverName}/message, /mcp/{serverName}/sse
+	// MCP proxy routes — auth middleware added in Sprint 2
+	r.Route("/mcp/{serverName}", func(r chi.Router) {
+		r.Post("/message", s.proxyHandler.HandleStreamableHTTP)
+		r.Get("/sse", s.proxyHandler.HandleSSEStream)
+		r.Post("/sse", s.proxyHandler.HandleSSEMessage)
 	})
 
-	r.Group(func(r chi.Router) {
-		// Admin API: /api/v1/admin/...
-	})
+	// Admin REST API — auth + RBAC middleware added in Sprint 2/4
+	r.Mount("/api/v1/admin", s.adminRouter.Handler())
 
 	return r
 }
