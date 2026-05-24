@@ -11,7 +11,8 @@ BIN         := bin/mcpgate
         lint lint-fix security-scan \
         migrate-up migrate-down migrate-create \
         docker-up docker-down \
-        seed clean help
+        ci ci-fast ci-services \
+        seed clean install-hooks help
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -84,6 +85,29 @@ docker-down:
 seed:
 	$(GVM_GO) run ./cmd/mcpgate seed --config configs/mcpgate.dev.yaml
 
+# ── Local CI ──────────────────────────────────────────────────────────────────
+
+# Fast check: lint + unit tests + build — no Docker needed (~30s).
+# Run by the pre-push git hook on every push.
+ci-fast: lint test-unit build
+
+# Start only the CI services (Postgres + Redis) and wait until healthy.
+ci-services:
+	docker compose -f deployments/docker/docker-compose.dev.yml up -d --wait postgres redis
+
+# Full local CI pipeline — mirrors the removed .github/workflows/ci.yml.
+# Run this before opening a PR or merging to main.
+ci: lint test-unit ci-services migrate-up test-integration build security-scan
+	@echo ""
+	@echo "All CI checks passed."
+
+# Install the pre-push git hook that runs make ci-fast before every push.
+install-hooks:
+	@mkdir -p .git/hooks
+	@cp scripts/pre-push.hook .git/hooks/pre-push
+	@chmod +x .git/hooks/pre-push
+	@echo "pre-push hook installed (.git/hooks/pre-push)"
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 clean:
@@ -109,5 +133,8 @@ help:
 	@echo "  migrate-create     Create a new migration (name=<suffix>)"
 	@echo "  docker-up          Start Postgres + Redis via docker compose"
 	@echo "  docker-down        Stop and remove Docker services"
+	@echo "  ci-fast            Lint + unit tests + build (no Docker, used by pre-push hook)"
+	@echo "  ci                 Full local CI pipeline (requires Docker)"
+	@echo "  install-hooks      Install git pre-push hook"
 	@echo "  seed               Seed database with default roles and admin user"
 	@echo "  clean              Remove build artifacts"

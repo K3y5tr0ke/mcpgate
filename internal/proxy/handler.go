@@ -13,8 +13,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
-	"github.com/K3y5tr0ke/mcpgate/internal/store"
 	"github.com/K3y5tr0ke/mcpgate/internal/proxy/transport"
+	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
 const serverCacheTTL = 30 * time.Second
@@ -77,7 +77,7 @@ func (h *Handler) HandleStreamableHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(resp) //nolint:errcheck
+	_, _ = w.Write(resp) //nolint:gosec // G705: proxy forwards JSON-RPC from admin-configured servers, not user input
 }
 
 // HandleSSEStream is the chi handler for GET /mcp/{serverName}/sse.
@@ -108,7 +108,7 @@ func (h *Handler) HandleSSEStream(w http.ResponseWriter, r *http.Request) {
 		for {
 			select {
 			case msg := <-messages:
-				fmt.Fprintf(w, "data: %s\n\n", msg)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", msg)
 				flusher.Flush()
 			case <-ctx.Done():
 				return
@@ -148,7 +148,7 @@ func (h *Handler) HandleSSEMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(resp) //nolint:errcheck
+	_, _ = w.Write(resp) //nolint:gosec // G705: proxy forwards JSON-RPC from admin-configured servers, not user input
 }
 
 // transportFor returns a cached Transport for serverName, creating one if needed.
@@ -173,7 +173,7 @@ func (h *Handler) transportFor(ctx context.Context, serverName string) (transpor
 	// Store with compare-and-swap to avoid a race on first creation.
 	actual, loaded := h.transports.LoadOrStore(serverName, tr)
 	if loaded {
-		tr.Close() //nolint:errcheck
+		_ = tr.Close()
 		return actual.(transport.Transport), nil
 	}
 	return tr, nil
@@ -258,5 +258,5 @@ func (h *Handler) readBody(r *http.Request) ([]byte, error) {
 func (h *Handler) writeError(w http.ResponseWriter, id json.RawMessage, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK) // JSON-RPC errors still use 200
-	w.Write(ErrorResponse(id, code, message)) //nolint:errcheck
+	_, _ = w.Write(ErrorResponse(id, code, message))
 }

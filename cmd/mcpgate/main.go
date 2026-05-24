@@ -68,7 +68,7 @@ func cmdServe(args []string) error {
 	if err != nil {
 		return fmt.Errorf("connect redis: %w", err)
 	}
-	defer redisClient.Close()
+	defer redisClient.Close() //nolint:errcheck
 
 	srv := server.New(cfg, logger, db, redisClient)
 	return srv.Run()

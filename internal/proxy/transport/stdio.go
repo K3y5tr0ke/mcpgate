@@ -109,7 +109,7 @@ func (t *Stdio) Close() error {
 		t.procMu.Lock()
 		defer t.procMu.Unlock()
 		if t.stdin != nil {
-			t.stdin.Close()
+			_ = t.stdin.Close()
 		}
 		if t.proc != nil && t.proc.Process != nil {
 			err = t.proc.Process.Kill()

@@ -33,7 +33,7 @@ func (t *StreamableHTTP) Send(ctx context.Context, message []byte) ([]byte, erro
 	if err != nil {
 		return nil, fmt.Errorf("streamable: send: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("streamable: upstream returned %d", resp.StatusCode)

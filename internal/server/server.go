@@ -62,7 +62,6 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 func (s *Server) buildRouter() http.Handler {
 	r := chi.NewRouter()
 
-	r.Use(chimw.RealIP)
 	r.Use(chimw.RequestID)
 	r.Use(chimw.Recoverer)
 	r.Use(s.requestLogger)

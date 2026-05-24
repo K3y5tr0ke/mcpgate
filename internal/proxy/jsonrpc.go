@@ -9,7 +9,7 @@ import (
 // We only decode fields the proxy needs; the raw body is passed through unchanged.
 type Message struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`      // string, number, or null
+	ID      json.RawMessage `json:"id,omitempty"` // string, number, or null
 	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`

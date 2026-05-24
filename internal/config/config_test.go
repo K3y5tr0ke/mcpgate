@@ -64,7 +64,7 @@ func TestLoadFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	_, err = f.WriteString(`
 server:

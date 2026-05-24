@@ -118,7 +118,7 @@ func (s *MockMCPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func writeRPCResult(w http.ResponseWriter, id json.RawMessage, result any) {
 	resp := map[string]any{"jsonrpc": "2.0", "id": id, "result": result}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func writeRPCError(w http.ResponseWriter, id json.RawMessage, code int, msg string) {
@@ -129,5 +129,5 @@ func writeRPCError(w http.ResponseWriter, id json.RawMessage, code int, msg stri
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	_ = json.NewEncoder(w).Encode(resp)
 }

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# pre-push hook — runs make ci-fast (lint + unit tests + build) before every push.
+# Install with: make install-hooks
+#
+# To run the full CI pipeline including integration tests before a push:
+#   make ci && git push
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo "[pre-push] Running ci-fast (lint + unit tests + build)..."
+make ci-fast
+
+echo "[pre-push] Passed. Tip: run 'make ci' for the full integration suite before merging."

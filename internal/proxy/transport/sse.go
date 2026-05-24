@@ -44,7 +44,7 @@ func (t *SSE) Send(ctx context.Context, message []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sse: send: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("sse: upstream returned %d", resp.StatusCode)
@@ -71,7 +71,7 @@ func (t *SSE) Stream(ctx context.Context, message []byte, messages chan<- []byte
 	if err != nil {
 		return fmt.Errorf("sse: open stream: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
