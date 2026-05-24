@@ -80,6 +80,17 @@ type RateLimiter interface {
 	Allow(ctx context.Context, key string, limit RateLimit) (RateLimitResult, error)
 }
 
+// SAMLIDPConfigStore manages SAML Identity Provider configurations.
+type SAMLIDPConfigStore interface {
+	Create(ctx context.Context, cfg *SAMLIDPConfig) error
+	GetByID(ctx context.Context, id uuid.UUID) (*SAMLIDPConfig, error)
+	GetByName(ctx context.Context, name string) (*SAMLIDPConfig, error)
+	List(ctx context.Context) ([]SAMLIDPConfig, error)
+	ListEnabled(ctx context.Context) ([]SAMLIDPConfig, error)
+	Update(ctx context.Context, cfg *SAMLIDPConfig) error
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
 // --- Domain types ---
 
 type User struct {
@@ -196,4 +207,18 @@ type RateLimitResult struct {
 	Remaining  int64
 	ResetAt    time.Time
 	RetryAfter time.Duration
+}
+
+type SAMLIDPConfig struct {
+	ID           uuid.UUID         `db:"id"`
+	Name         string            `db:"name"`
+	EntityID     string            `db:"entity_id"`
+	SSOURL       string            `db:"sso_url"`
+	SLOURL       *string           `db:"slo_url"` // nullable
+	Certificate  string            `db:"certificate"`
+	AttributeMap map[string]string `db:"attribute_map"`  // JSONB
+	GroupRoleMap map[string]string `db:"group_role_map"` // JSONB
+	IsEnabled    bool              `db:"is_enabled"`
+	CreatedAt    time.Time         `db:"created_at"`
+	UpdatedAt    time.Time         `db:"updated_at"`
 }

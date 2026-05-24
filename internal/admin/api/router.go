@@ -13,12 +13,13 @@ import (
 // Router is the admin REST API sub-router.
 type Router struct {
 	servers store.ServerStore
+	idps    store.SAMLIDPConfigStore
 	logger  *slog.Logger
 }
 
 // NewRouter creates an admin API Router wired to the given stores.
-func NewRouter(servers store.ServerStore, logger *slog.Logger) *Router {
-	return &Router{servers: servers, logger: logger}
+func NewRouter(servers store.ServerStore, idps store.SAMLIDPConfigStore, logger *slog.Logger) *Router {
+	return &Router{servers: servers, idps: idps, logger: logger}
 }
 
 // Handler returns the chi http.Handler for all /api/v1/admin routes.
@@ -26,6 +27,7 @@ func (rt *Router) Handler() http.Handler {
 	r := chi.NewRouter()
 
 	sh := &serverHandler{servers: rt.servers, logger: rt.logger}
+	ih := &idpHandler{idps: rt.idps, logger: rt.logger}
 
 	r.Route("/servers", func(r chi.Router) {
 		r.Get("/", sh.list)
@@ -34,6 +36,16 @@ func (rt *Router) Handler() http.Handler {
 			r.Get("/", sh.get)
 			r.Put("/", sh.update)
 			r.Delete("/", sh.delete)
+		})
+	})
+
+	r.Route("/idps", func(r chi.Router) {
+		r.Get("/", ih.list)
+		r.Post("/", ih.create)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", ih.get)
+			r.Put("/", ih.update)
+			r.Delete("/", ih.delete)
 		})
 	})
 

@@ -18,33 +18,77 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/admin/api"
+	"github.com/K3y5tr0ke/mcpgate/internal/auth"
+	jwtpkg "github.com/K3y5tr0ke/mcpgate/internal/auth/jwt"
+	samlpkg "github.com/K3y5tr0ke/mcpgate/internal/auth/saml"
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
 	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
 	pgstore "github.com/K3y5tr0ke/mcpgate/internal/store/postgres"
+	redisstore "github.com/K3y5tr0ke/mcpgate/internal/store/redis"
 )
 
 // Server is the main HTTP server wrapping the chi router and all dependencies.
 type Server struct {
-	cfg          *config.Config
-	logger       *slog.Logger
-	db           *pgxpool.Pool
-	redis        *redis.Client
-	proxyHandler *proxy.Handler
-	adminRouter  *api.Router
-	http         *http.Server
+	cfg            *config.Config
+	logger         *slog.Logger
+	db             *pgxpool.Pool
+	redis          *redis.Client
+	proxyHandler   *proxy.Handler
+	adminRouter    *api.Router
+	samlHandlers   *samlpkg.Handlers
+	jwtManager     *jwtpkg.Manager
+	sessionCache   *redisstore.SessionCache
+	authMiddleware func(http.Handler) http.Handler
+	http           *http.Server
 }
 
-// New builds a Server and wires the router. Call Run to start accepting connections.
-func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient *redis.Client) *Server {
+// New builds a Server and wires the router.
+// Returns an error if JWT key loading or SAML SP initialisation fails.
+func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient *redis.Client) (*Server, error) {
 	serverStore := pgstore.NewServerStore(db)
+	userStore := pgstore.NewUserStore(db)
+	sessionStore := pgstore.NewSessionStore(db)
+	roleStore := pgstore.NewRoleStore(db)
+	samlIDPStore := pgstore.NewSAMLIDPConfigStore(db)
+	sessionCache := redisstore.NewSessionCache(redisClient)
+
+	jwtManager, err := jwtpkg.NewManager(cfg.Auth.JWT, logger)
+	if err != nil {
+		return nil, fmt.Errorf("init JWT manager: %w", err)
+	}
+
+	samlSP, err := samlpkg.NewSP(cfg.SAML, samlIDPStore, logger)
+	if err != nil {
+		return nil, fmt.Errorf("init SAML SP: %w", err)
+	}
+
+	samlHandlers := samlpkg.NewHandlers(
+		samlSP,
+		userStore,
+		sessionStore,
+		sessionCache,
+		roleStore,
+		samlIDPStore,
+		jwtManager,
+		redisClient,
+		cfg.SAML,
+		cfg.Auth,
+		logger,
+	)
+
+	authMiddleware := auth.Authenticate(jwtManager, sessionCache, cfg.Auth, logger)
 
 	s := &Server{
-		cfg:          cfg,
-		logger:       logger,
-		db:           db,
-		redis:        redisClient,
-		proxyHandler: proxy.NewHandler(cfg.Proxy, serverStore, logger),
-		adminRouter:  api.NewRouter(serverStore, logger),
+		cfg:            cfg,
+		logger:         logger,
+		db:             db,
+		redis:          redisClient,
+		proxyHandler:   proxy.NewHandler(cfg.Proxy, serverStore, logger),
+		adminRouter:    api.NewRouter(serverStore, samlIDPStore, logger),
+		samlHandlers:   samlHandlers,
+		jwtManager:     jwtManager,
+		sessionCache:   sessionCache,
+		authMiddleware: authMiddleware,
 	}
 
 	s.http = &http.Server{
@@ -56,7 +100,7 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 		MaxHeaderBytes: cfg.Server.MaxHeaderBytes,
 	}
 
-	return s
+	return s, nil
 }
 
 func (s *Server) buildRouter() http.Handler {
@@ -66,19 +110,31 @@ func (s *Server) buildRouter() http.Handler {
 	r.Use(chimw.Recoverer)
 	r.Use(s.requestLogger)
 
-	// Auth-exempt system endpoints
+	// Auth-exempt system endpoints.
 	r.Get("/health", s.handleHealth)
 	r.Get("/ready", s.handleReady)
 
-	// MCP proxy routes — auth middleware added in Sprint 2
+	// SAML auth routes — no auth middleware (these ARE the login flow).
+	r.Route("/auth/saml", func(r chi.Router) {
+		r.Get("/login", s.samlHandlers.Login)
+		r.Post("/acs", s.samlHandlers.ACS)
+		r.Get("/metadata", s.samlHandlers.Metadata)
+		r.Get("/logout", s.samlHandlers.Logout)
+	})
+
+	// MCP proxy routes — protected by JWT middleware.
 	r.Route("/mcp/{serverName}", func(r chi.Router) {
+		r.Use(s.authMiddleware)
 		r.Post("/message", s.proxyHandler.HandleStreamableHTTP)
 		r.Get("/sse", s.proxyHandler.HandleSSEStream)
 		r.Post("/sse", s.proxyHandler.HandleSSEMessage)
 	})
 
-	// Admin REST API — auth + RBAC middleware added in Sprint 2/4
-	r.Mount("/api/v1/admin", s.adminRouter.Handler())
+	// Admin REST API — protected by JWT middleware.
+	r.Group(func(r chi.Router) {
+		r.Use(s.authMiddleware)
+		r.Mount("/api/v1/admin", s.adminRouter.Handler())
+	})
 
 	return r
 }

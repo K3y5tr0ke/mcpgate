@@ -70,7 +70,10 @@ func cmdServe(args []string) error {
 	}
 	defer redisClient.Close() //nolint:errcheck
 
-	srv := server.New(cfg, logger, db, redisClient)
+	srv, err := server.New(cfg, logger, db, redisClient)
+	if err != nil {
+		return fmt.Errorf("init server: %w", err)
+	}
 	return srv.Run()
 }
 

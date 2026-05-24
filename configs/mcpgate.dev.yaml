@@ -22,6 +22,22 @@ redis:
   password: ""
   db: 0
 
+auth:
+  session_ttl: 8h
+  session_sliding: true
+  jwt:
+    issuer: "mcpgate-dev"
+    access_token_ttl: 15m
+    signing_key_file: ""    # empty = ephemeral RSA key (dev only — tokens lost on restart)
+
+saml:
+  entity_id: "http://localhost:8080/auth/saml/metadata"
+  acs_url: "http://localhost:8080/auth/saml/acs"
+  metadata_url: "http://localhost:8080/auth/saml/metadata"
+  attribute_mapping:
+    email: "email"
+    display_name: "displayName"
+
 logging:
   level: "debug"
   format: "text"
