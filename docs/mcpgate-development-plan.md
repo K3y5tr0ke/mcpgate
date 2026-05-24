@@ -19,7 +19,7 @@ This plan follows four governing principles. First, **vertical slices over horiz
 | Role | Count | Responsibilities |
 |------|-------|-----------------|
 | Tech Lead / Architect | 1 | Architecture decisions, code review, cross-cutting concerns (config, middleware chain, error handling). Writes core proxy engine. |
-| Backend Engineer (Auth) | 1 | SAML SP, OAuth server, JWT middleware, session management. Security-focused. |
+| Backend Engineer (Auth) | 1 | SAML SP, Auth0 IdP integration, JWT middleware, session management. Security-focused. |
 | Backend Engineer (Proxy + Infra) | 1 | Transport adapters, connection pooling, circuit breaker, health checks, Docker, CI/CD, database migrations. |
 | Backend Engineer (Observability) | 1 | Logging pipeline, metrics collector, OpenTelemetry integration, audit log integrity. |
 | Frontend Engineer | 1 | React admin console, all pages, API client layer, E2E tests. Joins at Phase 6. |
@@ -247,23 +247,23 @@ seed:
 
 ---
 
-### Sprint 3: Authentication — OAuth + Session Polish (Week 5–6)
+### Sprint 3: Authentication — Auth0 M2M + Session Polish (Week 5–6)
 
-**Goal:** Programmatic clients authenticate via OAuth 2.0. Session management is hardened.
+**Goal:** Programmatic clients authenticate via Auth0 M2M tokens. Session management is hardened.
+
+Auth0 hosts the OAuth 2.0 authorization server. mcpgate's role in Sprint 3 is to validate Auth0-issued JWTs (via JWKS) alongside the SAML session JWTs already issued by mcpgate in Sprint 2.
 
 | # | Task | Owner | Estimate | Acceptance Criteria |
 |---|------|-------|----------|-------------------|
-| 3.1 | OAuth 2.0 authorization server (internal/auth/oauth/server.go) | Auth Eng | 8h | ory/fosite-based OAuth server. Authorization Code + PKCE grant. Client Credentials grant. Token endpoint (POST /auth/oauth/token). |
-| 3.2 | OAuth client management (internal/store/postgres/oauth.go) | Auth Eng | 3h | CRUD for oauth_clients table. Client secret hashing (bcrypt). Scope validation. |
-| 3.3 | OAuth admin API (POST/GET/DELETE /api/v1/admin/oauth/clients) | Auth Eng | 3h | Create OAuth client → receive client_id + client_secret. List clients. Revoke client. |
-| 3.4 | JWKS endpoint (GET /auth/oauth/jwks) | Auth Eng | 2h | Publish RS256 public key in JWKS format for external JWT verification. |
-| 3.5 | Unify auth middleware for SAML + OAuth tokens | Auth Eng | 2h | Middleware accepts JWTs from both SAML sessions and OAuth token grants. Role claims are present in both. |
-| 3.6 | Brute-force detection on auth endpoints | Auth Eng | 3h | Rate limit failed auth attempts per IP (Redis counter). Lock out after N failures for M minutes. Log security event. |
-| 3.7 | Session fixation prevention | Auth Eng | 1h | Generate new session ID after SAML authentication completes. Old session (if any) invalidated. |
-| 3.8 | Integration test: OAuth client credentials flow | Auth Eng | 3h | Create OAuth client via admin API. Request token with client_credentials grant. Use token to make proxy request. Verify success. |
-| 3.9 | Integration test: OAuth authorization code + PKCE flow | Auth Eng | 3h | Simulate interactive OAuth flow. Verify PKCE challenge/verifier. Token exchange. Proxy request with resulting access token. |
+| 3.1 | Auth0 JWKS client (internal/auth/jwks/client.go) | Auth Eng | 4h | Fetch and cache Auth0's JWKS endpoint. TTL-based cache (1h). Automatic refresh on key miss. Thread-safe. |
+| 3.2 | Auth0 M2M token validator (internal/auth/jwks/validator.go) | Auth Eng | 3h | Validate Auth0-issued JWTs: RS256 signature (via JWKS), `iss` matches configured Auth0 tenant, `aud` matches configured API identifier, not expired. Return `UserIdentity` with roles from Auth0 `permissions` claim. |
+| 3.3 | Unified auth middleware (update internal/auth/middleware.go) | Auth Eng | 2h | Middleware detects token origin (mcpgate-issued vs Auth0-issued by `iss` claim) and routes to the correct validator. Both paths inject a `UserIdentity` into request context. |
+| 3.4 | Auth0 M2M application setup guide | Auth Eng | 1h | Document how to create an Auth0 M2M application, assign API permissions, and configure the audience in mcpgate config. |
+| 3.5 | Brute-force detection on auth endpoints | Auth Eng | 3h | Rate limit failed auth attempts per IP (Redis counter). Lock out after N failures for M minutes. Log security event. |
+| 3.6 | Session fixation prevention | Auth Eng | 1h | Generate new session ID after SAML authentication completes. Old session (if any) invalidated. |
+| 3.7 | Integration test: Auth0 M2M token validation | Auth Eng | 3h | Use Auth0 test token (or offline-signed JWT matching JWKS key) to call a protected proxy route. Verify 200. Verify tampered token → 401. Verify expired token → 401. |
 
-**Sprint 3 deliverable:** Both human users (SAML) and service accounts (OAuth) can authenticate and make authorized proxy requests.
+**Sprint 3 deliverable:** Both human users (SAML via Auth0) and service accounts (Auth0 M2M tokens) can authenticate and make authorized proxy requests.
 
 ---
 
@@ -462,7 +462,7 @@ seed:
 |-----------|---------|---------|--------------|
 | chi | HTTP router | MIT | Dependabot, minor/patch auto-merge |
 | crewjam/saml | SAML SP | Apache 2.0 | Manual review (security-critical) |
-| ory/fosite | OAuth 2.0 server | Apache 2.0 | Manual review (security-critical) |
+| golang-jwt/jwt | JWT signing + validation (RS256) | MIT | Dependabot, minor/patch auto-merge |
 | casbin/casbin | RBAC engine | Apache 2.0 | Dependabot, minor/patch auto-merge |
 | jackc/pgx | PostgreSQL driver | MIT | Dependabot, minor/patch auto-merge |
 | redis/go-redis | Redis client | BSD-2 | Dependabot, minor/patch auto-merge |

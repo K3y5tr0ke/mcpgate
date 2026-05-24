@@ -420,62 +420,77 @@ func RequestIDFromContext(ctx context.Context) string { ... }
    │──────────────────>│                     │
 ```
 
-### 5.2 OAuth 2.0 Client Credentials Flow
+### 5.2 Auth0 Machine-to-Machine (M2M) Flow
+
+Service accounts (AI agents, CI/CD pipelines) authenticate directly with Auth0 using the OAuth 2.0 Client Credentials grant. mcpgate does **not** host a token endpoint — it only validates the resulting JWT by fetching Auth0's JWKS public keys.
 
 ```
-┌──────────┐          ┌──────────┐
-│  Service  │          │ mcpgate  │
-│  Account  │          │          │
-└────┬──────┘          └────┬─────┘
-     │                      │
-     │  POST /auth/oauth/token
-     │  Content-Type: application/x-www-form-urlencoded
-     │  grant_type=client_credentials
-     │  client_id=<id>
-     │  client_secret=<secret>
-     │  scope=mcp:proxy
-     │─────────────────────>│
-     │                      │
-     │                      │  Validate:
-     │                      │   - client_id exists and is active
-     │                      │   - client_secret matches (bcrypt)
-     │                      │   - requested scopes are allowed
-     │                      │
-     │                      │  Issue:
-     │                      │   - Access token (JWT, RS256)
-     │                      │   - Claims: sub=client_id, scopes, roles, exp
-     │                      │
-     │  200 OK
-     │  { "access_token": "<jwt>",
-     │    "token_type": "Bearer",
-     │    "expires_in": 900 }
-     │<─────────────────────│
-     │                      │
-     │  POST /mcp/server/message
-     │  Authorization: Bearer <jwt>
-     │  { "jsonrpc": "2.0", ... }
-     │─────────────────────>│
+┌──────────┐        ┌──────────┐        ┌──────────┐
+│  Service  │        │  Auth0   │        │ mcpgate  │
+│  Account  │        │          │        │          │
+└────┬──────┘        └────┬─────┘        └────┬─────┘
+     │                    │                   │
+     │  POST /oauth/token │                   │
+     │  grant_type=client_credentials         │
+     │  client_id=<id>    │                   │
+     │  client_secret=<s> │                   │
+     │  audience=<api>    │                   │
+     │───────────────────>│                   │
+     │                    │                   │
+     │  200 OK            │                   │
+     │  { "access_token": "<jwt>",            │
+     │    "token_type": "Bearer",             │
+     │    "expires_in": 86400 }               │
+     │<───────────────────│                   │
+     │                    │                   │
+     │  POST /mcp/server/message              │
+     │  Authorization: Bearer <auth0-jwt>     │
+     │────────────────────────────────────────>
+     │                    │                   │
+     │                    │  Validate JWT via  │
+     │                    │  Auth0 JWKS        │
+     │                    │  (cached, 1h TTL)  │
+     │                    │                   │
+     │  200 OK (proxied response)             │
+     │<────────────────────────────────────────
 ```
+
+Auth0 M2M applications are created and managed in the Auth0 dashboard. mcpgate trusts tokens issued by the configured Auth0 tenant (`iss` claim) and validates the audience (`aud`) against a configured value.
 
 ### 5.3 JWT Structure
 
+mcpgate handles two distinct JWT types. The middleware checks the `iss` claim to route validation.
+
+**mcpgate session JWT** (issued after SAML login, RS256, ephemeral key in dev):
+
 ```json
 {
-  "header": {
-    "alg": "RS256",
-    "typ": "JWT",
-    "kid": "mcpgate-signing-key-2026"
-  },
+  "header": { "alg": "RS256", "typ": "JWT", "kid": "mcpgate-signing-key-2026" },
   "payload": {
-    "iss": "mcpgate",
+    "iss": "mcpgate-dev",
     "sub": "550e8400-e29b-41d4-a716-446655440000",
     "email": "jane.doe@company.com",
     "roles": ["developer", "viewer"],
     "session_id": "01902e8a-1234-7890-abcd-ef1234567890",
-    "scopes": ["mcp:proxy", "mcp:admin:read"],
     "iat": 1748000000,
     "exp": 1748000900,
     "nbf": 1748000000
+  }
+}
+```
+
+**Auth0 M2M JWT** (issued by Auth0 Client Credentials grant, validated via Auth0 JWKS):
+
+```json
+{
+  "header": { "alg": "RS256", "typ": "JWT", "kid": "<auth0-key-id>" },
+  "payload": {
+    "iss": "https://dev-<tenant>.us.auth0.com/",
+    "sub": "<client_id>@clients",
+    "aud": "<api-identifier>",
+    "permissions": ["mcp:proxy"],
+    "iat": 1748000000,
+    "exp": 1748086400
   }
 }
 ```
@@ -1367,11 +1382,9 @@ type SAMLProvider interface {
     Metadata() ([]byte, error)
 }
 
-type OAuthProvider interface {
-    // HandleTokenRequest processes an OAuth token request
-    HandleTokenRequest(w http.ResponseWriter, r *http.Request)
-    // HandleAuthorize processes an OAuth authorization request
-    HandleAuthorize(w http.ResponseWriter, r *http.Request)
+type M2MTokenValidator interface {
+    // Validate validates an Auth0-issued M2M JWT via JWKS and returns the identity
+    Validate(ctx context.Context, tokenString string) (*UserIdentity, error)
 }
 
 type RBACEnforcer interface {

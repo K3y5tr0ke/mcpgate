@@ -208,17 +208,13 @@ The admin console provides a guided SAML setup flow:
 
 ---
 
-### 6.3 Authorization (OAuth 2.0 + RBAC)
+### 6.3 Authorization (Auth0 M2M + RBAC)
 
-**6.3.1 OAuth 2.0 Authorization Server**
+**6.3.1 Programmatic Access via Auth0 M2M**
 
-mcpgate includes a lightweight OAuth 2.0 authorization server for programmatic access (agent-to-proxy, CI/CD pipelines, service accounts). Supported grants:
+mcpgate delegates OAuth 2.0 token issuance to Auth0. Service accounts (AI agents, CI/CD pipelines, automation scripts) obtain JWTs from Auth0 using the Client Credentials grant and present them directly to mcpgate. mcpgate validates these tokens against Auth0's JWKS endpoint without hosting a token endpoint of its own.
 
-- Authorization Code with PKCE (for interactive clients)
-- Client Credentials (for service-to-service)
-- Token Refresh
-
-Tokens are JWTs signed with RS256, containing the user's roles and scoped permissions as claims. Token lifetime is configurable (default: access token 15 min, refresh token 7 days).
+This eliminates the `ory/fosite` dependency and aligns the service-account auth path with the same Auth0 tenant used for SAML human login. M2M applications are created and managed in the Auth0 dashboard; mcpgate only needs the tenant domain and API audience configured.
 
 **6.3.2 RBAC Model**
 
@@ -264,7 +260,7 @@ Administrators can create custom roles with arbitrary permission sets.
 **6.3.4 Policy Evaluation Flow**
 
 ```
-1. Extract user identity from JWT (set by SAML login or OAuth token)
+1. Extract user identity from JWT (set by SAML login or Auth0 M2M token)
 2. Extract target server and tool from the MCP message
 3. Query Casbin enforcer with (user_role, server_id, tool_name, action)
 4. If ALLOW → proxy the message
@@ -503,7 +499,7 @@ RBAC policies, server registrations, rate limits, and most settings can be chang
 |-----------|-----------|-----------|
 | HTTP framework | `net/http` + `chi` router | Stdlib-aligned, minimal overhead, middleware-friendly |
 | SAML | `crewjam/saml` | Mature Go SAML SP library |
-| OAuth | `ory/fosite` | Comprehensive OAuth 2.0 server library |
+| Auth0 M2M validation | `golang-jwt/jwt` + Auth0 JWKS | Auth0 issues M2M tokens; mcpgate validates via JWKS — no local OAuth server |
 | RBAC | `casbin/casbin` | Flexible policy engine with PostgreSQL adapter |
 | Database | `jackc/pgx` v5 | High-performance PostgreSQL driver |
 | Migrations | `golang-migrate/migrate` | Version-controlled schema migrations |
@@ -714,10 +710,7 @@ GET    /auth/saml/logout                 — Initiate SAML SLO
 POST   /auth/saml/slo                    — SAML SLO response
 GET    /auth/saml/metadata               — SP metadata XML
 
-POST   /auth/oauth/token                 — OAuth token endpoint
-POST   /auth/oauth/authorize             — OAuth authorization endpoint
-POST   /auth/oauth/revoke                — Revoke token
-GET    /auth/oauth/jwks                  — JWKS endpoint
+# M2M tokens are issued by Auth0 (not mcpgate). No local /auth/oauth/* endpoints.
 ```
 
 ### 10.3 Admin API Endpoints
@@ -768,11 +761,6 @@ POST   /saml/configs                     — Add IdP config
 PUT    /saml/configs/{id}                — Update IdP config
 DELETE /saml/configs/{id}                — Remove IdP config
 POST   /saml/configs/{id}/test           — Test SAML flow
-
-# OAuth
-GET    /oauth/clients                    — List OAuth clients
-POST   /oauth/clients                    — Create client
-DELETE /oauth/clients/{id}               — Revoke client
 
 # Settings
 GET    /settings                         — Get system settings
@@ -966,19 +954,18 @@ mcpgate/
 
 ### Phase 2: Authentication (Weeks 5–7)
 
-**Objective:** SAML 2.0 authentication with IdP integration and OAuth token issuance.
+**Objective:** SAML 2.0 authentication via Auth0 IdP and Auth0 M2M token validation for service accounts.
 
 | Task | Description | Estimate |
 |------|------------|----------|
 | SAML SP implementation | SP-initiated SSO, ACS handler, SLO, metadata generation | 4d |
 | SAML attribute mapping | Configurable attribute extraction and user provisioning (JIT) | 2d |
-| JWT session tokens | Issue JWTs after SAML auth. Middleware for JWT validation on proxy routes | 2d |
-| OAuth authorization server | Authorization Code + PKCE, Client Credentials grants. Token endpoint | 3d |
-| OAuth client management | CRUD for OAuth clients. Client secret hashing. Scope validation | 2d |
-| Auth middleware | Unified middleware: check JWT (from SAML session or OAuth token) on all proxy requests | 1d |
-| SAML test harness | Local IdP simulator (samltest.id integration or local SimpleSAMLphp) for dev/test | 1d |
+| JWT session tokens | Issue mcpgate JWTs after SAML auth. Middleware for JWT validation on proxy routes | 2d |
+| Auth0 JWKS client | Fetch and cache Auth0 public keys for M2M token validation | 1d |
+| Auth0 M2M token validation | Validate Auth0-issued M2M JWTs (iss, aud, sig, exp). Unified middleware for both token types | 1d |
+| SAML test harness | crewjam/saml in-process IdP for integration tests | 1d |
 
-**Milestone:** Users authenticate via SAML. Agents authenticate via OAuth. Unauthenticated requests are rejected.
+**Milestone:** Users authenticate via SAML (Auth0 as IdP). Agents authenticate via Auth0 M2M tokens. Unauthenticated requests are rejected.
 
 **Tests:** Unit tests for JWT creation/validation, SAML assertion parsing. Integration tests with a mock IdP. E2E test: full SAML login flow.
 
