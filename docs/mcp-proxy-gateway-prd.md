@@ -210,11 +210,13 @@ The admin console provides a guided SAML setup flow:
 
 ### 6.3 Authorization (Auth0 M2M + RBAC)
 
-**6.3.1 Programmatic Access via Auth0 M2M**
+**6.3.1 Programmatic Access via Configurable JWKS Validation**
 
-mcpgate delegates OAuth 2.0 token issuance to Auth0. Service accounts (AI agents, CI/CD pipelines, automation scripts) obtain JWTs from Auth0 using the Client Credentials grant and present them directly to mcpgate. mcpgate validates these tokens against Auth0's JWKS endpoint without hosting a token endpoint of its own.
+mcpgate delegates OAuth 2.0 token issuance entirely to external identity providers. Service accounts obtain JWTs from any trusted IdP (Auth0, Okta, Azure AD, Vault PKI) using Client Credentials and present them directly to mcpgate. mcpgate validates these tokens without hosting a token endpoint of its own.
 
-This eliminates the `ory/fosite` dependency and aligns the service-account auth path with the same Auth0 tenant used for SAML human login. M2M applications are created and managed in the Auth0 dashboard; mcpgate only needs the tenant domain and API audience configured.
+Trusted issuers are stored in the `jwks_configs` table (mirroring `saml_idp_configs`). Each row holds the `issuer` value (matched against the JWT `iss` claim), the `jwks_url` to fetch public keys from, and the required `audience`. The JWKS response is cached with a 1-hour TTL and refreshed on key-ID miss.
+
+Adding a new M2M provider requires no code changes — only an admin API call to insert a `jwks_configs` row. Auth0 is the initial configured issuer.
 
 **6.3.2 RBAC Model**
 
@@ -762,6 +764,12 @@ PUT    /saml/configs/{id}                — Update IdP config
 DELETE /saml/configs/{id}                — Remove IdP config
 POST   /saml/configs/{id}/test           — Test SAML flow
 
+# JWKS (M2M issuers)
+GET    /jwks/configs                     — List trusted JWKS issuers
+POST   /jwks/configs                     — Add issuer (name, issuer, jwks_url, audience)
+PUT    /jwks/configs/{id}                — Update issuer config
+DELETE /jwks/configs/{id}                — Remove issuer
+
 # Settings
 GET    /settings                         — Get system settings
 PUT    /settings                         — Update settings
@@ -961,8 +969,8 @@ mcpgate/
 | SAML SP implementation | SP-initiated SSO, ACS handler, SLO, metadata generation | 4d |
 | SAML attribute mapping | Configurable attribute extraction and user provisioning (JIT) | 2d |
 | JWT session tokens | Issue mcpgate JWTs after SAML auth. Middleware for JWT validation on proxy routes | 2d |
-| Auth0 JWKS client | Fetch and cache Auth0 public keys for M2M token validation | 1d |
-| Auth0 M2M token validation | Validate Auth0-issued M2M JWTs (iss, aud, sig, exp). Unified middleware for both token types | 1d |
+| `jwks_configs` store | Postgres store + admin API CRUD for trusted JWKS issuers. Unique constraint on `issuer`. | 1d |
+| JWKS client + M2M validator | Per-config key fetching (1h TTL cache, kid-miss refresh). Validator: iss lookup → JWKS → verify sig, aud, exp. | 1d |
 | SAML test harness | crewjam/saml in-process IdP for integration tests | 1d |
 
 **Milestone:** Users authenticate via SAML (Auth0 as IdP). Agents authenticate via Auth0 M2M tokens. Unauthenticated requests are rejected.

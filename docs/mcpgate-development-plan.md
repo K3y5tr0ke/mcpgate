@@ -247,23 +247,24 @@ seed:
 
 ---
 
-### Sprint 3: Authentication — Auth0 M2M + Session Polish (Week 5–6)
+### Sprint 3: Authentication — M2M JWKS Validation + Session Polish (Week 5–6)
 
-**Goal:** Programmatic clients authenticate via Auth0 M2M tokens. Session management is hardened.
+**Goal:** Programmatic clients authenticate via externally-issued M2M JWTs. The provider is configurable at runtime — no code changes to add a new issuer. Session management is hardened.
 
-Auth0 hosts the OAuth 2.0 authorization server. mcpgate's role in Sprint 3 is to validate Auth0-issued JWTs (via JWKS) alongside the SAML session JWTs already issued by mcpgate in Sprint 2.
+mcpgate's role is to validate M2M JWTs via a database-driven JWKS config store (parallel to `saml_idp_configs`). Auth0 is the first configured provider; Okta, Azure AD, or an internal Vault PKI can be added via the admin API.
 
 | # | Task | Owner | Estimate | Acceptance Criteria |
 |---|------|-------|----------|-------------------|
-| 3.1 | Auth0 JWKS client (internal/auth/jwks/client.go) | Auth Eng | 4h | Fetch and cache Auth0's JWKS endpoint. TTL-based cache (1h). Automatic refresh on key miss. Thread-safe. |
-| 3.2 | Auth0 M2M token validator (internal/auth/jwks/validator.go) | Auth Eng | 3h | Validate Auth0-issued JWTs: RS256 signature (via JWKS), `iss` matches configured Auth0 tenant, `aud` matches configured API identifier, not expired. Return `UserIdentity` with roles from Auth0 `permissions` claim. |
-| 3.3 | Unified auth middleware (update internal/auth/middleware.go) | Auth Eng | 2h | Middleware detects token origin (mcpgate-issued vs Auth0-issued by `iss` claim) and routes to the correct validator. Both paths inject a `UserIdentity` into request context. |
-| 3.4 | Auth0 M2M application setup guide | Auth Eng | 1h | Document how to create an Auth0 M2M application, assign API permissions, and configure the audience in mcpgate config. |
-| 3.5 | Brute-force detection on auth endpoints | Auth Eng | 3h | Rate limit failed auth attempts per IP (Redis counter). Lock out after N failures for M minutes. Log security event. |
-| 3.6 | Session fixation prevention | Auth Eng | 1h | Generate new session ID after SAML authentication completes. Old session (if any) invalidated. |
-| 3.7 | Integration test: Auth0 M2M token validation | Auth Eng | 3h | Use Auth0 test token (or offline-signed JWT matching JWKS key) to call a protected proxy route. Verify 200. Verify tampered token → 401. Verify expired token → 401. |
+| 3.1 | `jwks_configs` store (internal/store/postgres/jwks.go) | Auth Eng | 3h | `JWKSConfigStore` postgres implementation. CRUD + `GetByIssuer` + `ListEnabled`. `issuer` column has unique constraint. |
+| 3.2 | JWKS client (internal/auth/jwks/client.go) | Auth Eng | 3h | Per-config key fetching with TTL cache (1h). Automatic refresh on `kid` miss. Thread-safe. |
+| 3.3 | M2M token validator (internal/auth/jwks/validator.go) | Auth Eng | 3h | On each request: read `iss` claim → `GetByIssuer` → fetch/cache JWKS → verify RS256 signature, `aud`, `exp`. Return `UserIdentity` with roles from `permissions` claim. |
+| 3.4 | Unified auth middleware (update internal/auth/middleware.go) | Auth Eng | 2h | Detects mcpgate-issued JWT (by `iss` config value) vs external M2M JWT and routes to the correct validator. Both paths produce a `UserIdentity` in request context. |
+| 3.5 | JWKS config admin API (internal/admin/api/jwks.go) | Auth Eng | 3h | GET/POST/PUT/DELETE `/api/v1/admin/jwks/configs`. Seed Auth0 config on first install via `make seed-jwks`. |
+| 3.6 | Brute-force detection on auth endpoints | Auth Eng | 3h | Rate limit failed auth attempts per IP (Redis counter). Lock out after N failures for M minutes. Log security event. |
+| 3.7 | Session fixation prevention | Auth Eng | 1h | Generate new session ID after SAML authentication completes. Old session (if any) invalidated. |
+| 3.8 | Integration test: M2M token validation | Auth Eng | 3h | Seed a JWKS config row with a test RSA key. Sign a JWT offline. Call protected route → 200. Tampered JWT → 401. Expired → 401. Unknown issuer → 401. |
 
-**Sprint 3 deliverable:** Both human users (SAML via Auth0) and service accounts (Auth0 M2M tokens) can authenticate and make authorized proxy requests.
+**Sprint 3 deliverable:** Both human users (via SAML) and service accounts (via any configured JWKS issuer) can authenticate. Adding a new M2M provider requires only an admin API call.
 
 ---
 

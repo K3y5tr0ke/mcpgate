@@ -420,16 +420,16 @@ func RequestIDFromContext(ctx context.Context) string { ... }
    │──────────────────>│                     │
 ```
 
-### 5.2 Auth0 Machine-to-Machine (M2M) Flow
+### 5.2 Machine-to-Machine (M2M) Flow
 
-Service accounts (AI agents, CI/CD pipelines) authenticate directly with Auth0 using the OAuth 2.0 Client Credentials grant. mcpgate does **not** host a token endpoint — it only validates the resulting JWT by fetching Auth0's JWKS public keys.
+Service accounts (AI agents, CI/CD pipelines) authenticate directly with a trusted external IdP using the OAuth 2.0 Client Credentials grant. mcpgate does **not** host a token endpoint — it only validates the resulting JWT by fetching the issuer's JWKS public keys. Auth0 is the initial IdP; additional providers are added via the `jwks_configs` table with no code changes.
 
 ```
 ┌──────────┐        ┌──────────┐        ┌──────────┐
-│  Service  │        │  Auth0   │        │ mcpgate  │
-│  Account  │        │          │        │          │
-└────┬──────┘        └────┬─────┘        └────┬─────┘
-     │                    │                   │
+│  Service  │        │   IdP    │        │ mcpgate  │
+│  Account  │        │ (Auth0,  │        │          │
+└────┬──────┘        │  Okta,…) │        └────┬─────┘
+     │               └────┬─────┘             │
      │  POST /oauth/token │                   │
      │  grant_type=client_credentials         │
      │  client_id=<id>    │                   │
@@ -437,25 +437,41 @@ Service accounts (AI agents, CI/CD pipelines) authenticate directly with Auth0 u
      │  audience=<api>    │                   │
      │───────────────────>│                   │
      │                    │                   │
-     │  200 OK            │                   │
-     │  { "access_token": "<jwt>",            │
-     │    "token_type": "Bearer",             │
-     │    "expires_in": 86400 }               │
+     │  { "access_token": "<jwt>" }           │
      │<───────────────────│                   │
      │                    │                   │
      │  POST /mcp/server/message              │
-     │  Authorization: Bearer <auth0-jwt>     │
+     │  Authorization: Bearer <jwt>           │
      │────────────────────────────────────────>
      │                    │                   │
-     │                    │  Validate JWT via  │
-     │                    │  Auth0 JWKS        │
-     │                    │  (cached, 1h TTL)  │
+     │                    │  1. Read iss claim │
+     │                    │  2. Lookup in      │
+     │                    │     jwks_configs   │
+     │                    │  3. Fetch/cache    │
+     │                    │     JWKS (1h TTL)  │
+     │                    │  4. Verify sig,    │
+     │                    │     aud, exp       │
      │                    │                   │
      │  200 OK (proxied response)             │
      │<────────────────────────────────────────
 ```
 
-Auth0 M2M applications are created and managed in the Auth0 dashboard. mcpgate trusts tokens issued by the configured Auth0 tenant (`iss` claim) and validates the audience (`aud`) against a configured value.
+#### 5.2.1 JWKS Configuration Store
+
+Trusted M2M issuers are stored in a `jwks_configs` table, mirroring the `saml_idp_configs` pattern. The validator looks up the correct JWKS URL by matching the JWT `iss` claim against enabled entries. Multiple issuers can be active simultaneously.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | `uuid` | Primary key |
+| `name` | `text` | Human-readable label (e.g., `"Auth0 Production"`, `"Internal Vault PKI"`) |
+| `issuer` | `text` | Exact `iss` claim value the JWT must carry |
+| `jwks_url` | `text` | URL of the provider's JWKS endpoint |
+| `audience` | `text` | Required `aud` claim value |
+| `is_enabled` | `bool` | Toggle without deleting |
+| `created_at` | `timestamptz` | |
+| `updated_at` | `timestamptz` | |
+
+CRUD is exposed through the admin API at `/api/v1/admin/jwks/configs`. Adding a new M2M provider (Okta, Azure AD, internal Vault PKI) requires only an admin API call — no code changes and no restart.
 
 ### 5.3 JWT Structure
 
@@ -1382,8 +1398,27 @@ type SAMLProvider interface {
     Metadata() ([]byte, error)
 }
 
+// JWKSConfig mirrors a row in the jwks_configs table.
+type JWKSConfig struct {
+    ID        uuid.UUID
+    Name      string
+    Issuer    string // matched against JWT iss claim
+    JWKSURL   string
+    Audience  string
+    IsEnabled bool
+}
+
+type JWKSConfigStore interface {
+    Create(ctx context.Context, cfg *JWKSConfig) error
+    List(ctx context.Context) ([]JWKSConfig, error)
+    ListEnabled(ctx context.Context) ([]JWKSConfig, error)
+    GetByIssuer(ctx context.Context, issuer string) (*JWKSConfig, error)
+    Update(ctx context.Context, cfg *JWKSConfig) error
+    Delete(ctx context.Context, id uuid.UUID) error
+}
+
 type M2MTokenValidator interface {
-    // Validate validates an Auth0-issued M2M JWT via JWKS and returns the identity
+    // Validate looks up the issuer in jwks_configs, fetches/caches keys, and validates the JWT
     Validate(ctx context.Context, tokenString string) (*UserIdentity, error)
 }
 
