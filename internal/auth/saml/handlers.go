@@ -30,6 +30,7 @@ type Handlers struct {
 	idpStore     store.SAMLIDPConfigStore
 	jwtManager   *jwtpkg.Manager
 	redisClient  *redis.Client
+	guard        *BruteForceGuard
 	cfg          config.SAMLConfig
 	authCfg      config.AuthConfig
 	logger       *slog.Logger
@@ -58,6 +59,7 @@ func NewHandlers(
 		idpStore:     idpStore,
 		jwtManager:   jwtManager,
 		redisClient:  redisClient,
+		guard:        NewBruteForceGuard(redisClient, authCfg.BruteForce),
 		cfg:          cfg,
 		authCfg:      authCfg,
 		logger:       logger,
@@ -69,6 +71,15 @@ func NewHandlers(
 func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	if !h.sp.Configured() {
 		http.Error(w, "SAML not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	clientIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		clientIP = host
+	}
+	if h.guard.Check(r.Context(), "brute:saml_login:"+clientIP) {
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
 		return
 	}
 
@@ -117,6 +128,15 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) ACS(w http.ResponseWriter, r *http.Request) {
 	if !h.sp.Configured() {
 		http.Error(w, "SAML not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	clientIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		clientIP = host
+	}
+	if h.guard.Check(r.Context(), "brute:saml_acs:"+clientIP) {
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
 		return
 	}
 
@@ -209,15 +229,16 @@ func (h *Handlers) ACS(w http.ResponseWriter, r *http.Request) {
 		roleNames[i] = ro.Name
 	}
 
+	// Reset brute-force counters on successful authentication.
+	h.guard.Reset(r.Context(), "brute:saml_login:"+clientIP)
+	h.guard.Reset(r.Context(), "brute:saml_acs:"+clientIP)
+
+	// sessionID is always newly generated here — no pre-auth session exists to fix.
 	// Create durable session.
 	sessionID := uuid.New()
 	ttl := h.authCfg.SessionTTL
 	if ttl == 0 {
 		ttl = 24 * time.Hour
-	}
-	clientIP := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		clientIP = host
 	}
 	session := &store.Session{
 		ID:        sessionID,

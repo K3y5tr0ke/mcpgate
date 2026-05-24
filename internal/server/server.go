@@ -19,6 +19,7 @@ import (
 
 	"github.com/K3y5tr0ke/mcpgate/internal/admin/api"
 	"github.com/K3y5tr0ke/mcpgate/internal/auth"
+	jwkspkg "github.com/K3y5tr0ke/mcpgate/internal/auth/jwks"
 	jwtpkg "github.com/K3y5tr0ke/mcpgate/internal/auth/jwt"
 	samlpkg "github.com/K3y5tr0ke/mcpgate/internal/auth/saml"
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
@@ -50,6 +51,7 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 	sessionStore := pgstore.NewSessionStore(db)
 	roleStore := pgstore.NewRoleStore(db)
 	samlIDPStore := pgstore.NewSAMLIDPConfigStore(db)
+	jwksStore := pgstore.NewJWKSConfigStore(db)
 	sessionCache := redisstore.NewSessionCache(redisClient)
 
 	jwtManager, err := jwtpkg.NewManager(cfg.Auth.JWT, logger)
@@ -76,7 +78,13 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 		logger,
 	)
 
-	authMiddleware := auth.Authenticate(jwtManager, sessionCache, cfg.Auth, logger)
+	jwksTTL := cfg.Auth.M2M.JWKSCacheTTL
+	if jwksTTL == 0 {
+		jwksTTL = time.Hour
+	}
+	jwksValidator := jwkspkg.NewValidator(jwksStore, jwksTTL, logger)
+
+	authMiddleware := auth.Authenticate(jwtManager, jwksValidator, sessionCache, cfg.Auth, logger)
 
 	s := &Server{
 		cfg:            cfg,
@@ -84,7 +92,7 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 		db:             db,
 		redis:          redisClient,
 		proxyHandler:   proxy.NewHandler(cfg.Proxy, serverStore, logger),
-		adminRouter:    api.NewRouter(serverStore, samlIDPStore, logger),
+		adminRouter:    api.NewRouter(serverStore, samlIDPStore, jwksStore, logger),
 		samlHandlers:   samlHandlers,
 		jwtManager:     jwtManager,
 		sessionCache:   sessionCache,

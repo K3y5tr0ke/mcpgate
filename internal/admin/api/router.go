@@ -14,12 +14,13 @@ import (
 type Router struct {
 	servers store.ServerStore
 	idps    store.SAMLIDPConfigStore
+	jwks    store.JWKSConfigStore
 	logger  *slog.Logger
 }
 
 // NewRouter creates an admin API Router wired to the given stores.
-func NewRouter(servers store.ServerStore, idps store.SAMLIDPConfigStore, logger *slog.Logger) *Router {
-	return &Router{servers: servers, idps: idps, logger: logger}
+func NewRouter(servers store.ServerStore, idps store.SAMLIDPConfigStore, jwks store.JWKSConfigStore, logger *slog.Logger) *Router {
+	return &Router{servers: servers, idps: idps, jwks: jwks, logger: logger}
 }
 
 // Handler returns the chi http.Handler for all /api/v1/admin routes.
@@ -28,6 +29,7 @@ func (rt *Router) Handler() http.Handler {
 
 	sh := &serverHandler{servers: rt.servers, logger: rt.logger}
 	ih := &idpHandler{idps: rt.idps, logger: rt.logger}
+	jh := &jwksHandler{store: rt.jwks, logger: rt.logger}
 
 	r.Route("/servers", func(r chi.Router) {
 		r.Get("/", sh.list)
@@ -46,6 +48,16 @@ func (rt *Router) Handler() http.Handler {
 			r.Get("/", ih.get)
 			r.Put("/", ih.update)
 			r.Delete("/", ih.delete)
+		})
+	})
+
+	r.Route("/jwks/configs", func(r chi.Router) {
+		r.Get("/", jh.list)
+		r.Post("/", jh.create)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", jh.get)
+			r.Put("/", jh.update)
+			r.Delete("/", jh.delete)
 		})
 	})
 

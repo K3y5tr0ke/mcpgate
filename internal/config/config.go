@@ -64,9 +64,22 @@ type RedisConfig struct {
 }
 
 type AuthConfig struct {
-	SessionTTL     time.Duration `koanf:"session_ttl"`
-	SessionSliding bool          `koanf:"session_sliding"`
-	JWT            JWTConfig     `koanf:"jwt"`
+	SessionTTL     time.Duration    `koanf:"session_ttl"`
+	SessionSliding bool             `koanf:"session_sliding"`
+	JWT            JWTConfig        `koanf:"jwt"`
+	M2M            M2MConfig        `koanf:"m2m"`
+	BruteForce     BruteForceConfig `koanf:"brute_force"`
+}
+
+type M2MConfig struct {
+	JWKSCacheTTL time.Duration `koanf:"jwks_cache_ttl"` // default 1h
+}
+
+type BruteForceConfig struct {
+	Enabled     bool          `koanf:"enabled"`
+	MaxAttempts int           `koanf:"max_attempts"` // default 10
+	Window      time.Duration `koanf:"window"`       // default 15m
+	BlockFor    time.Duration `koanf:"block_for"`    // default 1h
 }
 
 type JWTConfig struct {
@@ -203,6 +216,15 @@ func defaults() *Config {
 				Issuer:          "mcpgate",
 				AccessTokenTTL:  15 * time.Minute,
 				RefreshTokenTTL: 7 * 24 * time.Hour,
+			},
+			M2M: M2MConfig{
+				JWKSCacheTTL: time.Hour,
+			},
+			BruteForce: BruteForceConfig{
+				Enabled:     true,
+				MaxAttempts: 10,
+				Window:      15 * time.Minute,
+				BlockFor:    time.Hour,
 			},
 		},
 		Proxy: ProxyConfig{

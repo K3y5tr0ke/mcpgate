@@ -80,6 +80,18 @@ type RateLimiter interface {
 	Allow(ctx context.Context, key string, limit RateLimit) (RateLimitResult, error)
 }
 
+// JWKSConfigStore manages trusted external JWT issuer configurations for M2M auth.
+type JWKSConfigStore interface {
+	Create(ctx context.Context, cfg *JWKSConfig) error
+	GetByID(ctx context.Context, id uuid.UUID) (*JWKSConfig, error)
+	GetByName(ctx context.Context, name string) (*JWKSConfig, error)
+	GetByIssuer(ctx context.Context, issuer string) (*JWKSConfig, error) // auth hot path
+	List(ctx context.Context) ([]JWKSConfig, error)
+	ListEnabled(ctx context.Context) ([]JWKSConfig, error)
+	Update(ctx context.Context, cfg *JWKSConfig) error
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
 // SAMLIDPConfigStore manages SAML Identity Provider configurations.
 type SAMLIDPConfigStore interface {
 	Create(ctx context.Context, cfg *SAMLIDPConfig) error
@@ -221,4 +233,18 @@ type SAMLIDPConfig struct {
 	IsEnabled    bool              `db:"is_enabled"`
 	CreatedAt    time.Time         `db:"created_at"`
 	UpdatedAt    time.Time         `db:"updated_at"`
+}
+
+// JWKSConfig represents a trusted external JWT issuer.
+// The Issuer field is matched exactly against the JWT iss claim.
+// Audience == "" means skip the audience check.
+type JWKSConfig struct {
+	ID        uuid.UUID `db:"id"`
+	Name      string    `db:"name"`
+	Issuer    string    `db:"issuer"`
+	JWKSURL   string    `db:"jwks_url"`
+	Audience  string    `db:"audience"`
+	IsEnabled bool      `db:"is_enabled"`
+	CreatedAt time.Time `db:"created_at"`
+	UpdatedAt time.Time `db:"updated_at"`
 }

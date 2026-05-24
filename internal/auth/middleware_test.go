@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -27,6 +28,15 @@ type mockValidator struct {
 
 func (m *mockValidator) Validate(_ string) (*jwtpkg.Claims, error) {
 	return m.claims, m.err
+}
+
+type mockM2MValidator struct {
+	identity *auth.UserIdentity
+	err      error
+}
+
+func (m *mockM2MValidator) ValidateToken(_ context.Context, _ string) (*auth.UserIdentity, error) {
+	return m.identity, m.err
 }
 
 type mockSessionCache struct {
@@ -65,7 +75,15 @@ func validSessionData(userID, sessionID uuid.UUID) *store.SessionData {
 }
 
 func buildMiddleware(validator auth.TokenValidator, cache store.SessionCache) func(http.Handler) http.Handler {
-	return auth.Authenticate(validator, cache, config.AuthConfig{}, slog.Default())
+	return auth.Authenticate(validator, nil, cache, config.AuthConfig{}, slog.Default())
+}
+
+// buildM2MToken constructs a minimal JWT with the given issuer for routing tests.
+// The signature is intentionally fake — these tests only exercise routing, not verification.
+func buildM2MToken(iss string) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + iss + `"}`))
+	return header + "." + payload + ".fakesig"
 }
 
 func applyMiddleware(mw func(http.Handler) http.Handler, next http.Handler) http.Handler {
@@ -221,5 +239,94 @@ func TestAuthenticate_CookieFallback(t *testing.T) {
 	}
 	if !called {
 		t.Error("next handler was not called")
+	}
+}
+
+// --- M2M routing tests ---
+
+func TestAuthenticate_M2M_ValidToken_IdentityInContext(t *testing.T) {
+	userID := uuid.New()
+	wantIdentity := &auth.UserIdentity{
+		UserID: userID,
+		Email:  "service@m2m",
+		Roles:  []string{"read"},
+	}
+	m2m := &mockM2MValidator{identity: wantIdentity}
+	mw := auth.Authenticate(
+		&mockValidator{},
+		m2m,
+		&mockSessionCache{},
+		config.AuthConfig{JWT: config.JWTConfig{Issuer: "mcpgate"}},
+		slog.Default(),
+	)
+
+	token := buildM2MToken("https://external.example.com/")
+
+	var gotIdentity auth.UserIdentity
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := auth.IdentityFromContext(r.Context())
+		if !ok {
+			t.Error("identity not in context")
+		}
+		gotIdentity = id
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, newRequest(token))
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", rec.Code)
+	}
+	if gotIdentity.Email != "service@m2m" {
+		t.Errorf("Email: got %q, want %q", gotIdentity.Email, "service@m2m")
+	}
+}
+
+func TestAuthenticate_M2M_InvalidToken_Returns401(t *testing.T) {
+	m2m := &mockM2MValidator{err: fmt.Errorf("invalid signature")}
+	mw := auth.Authenticate(
+		&mockValidator{},
+		m2m,
+		&mockSessionCache{},
+		config.AuthConfig{JWT: config.JWTConfig{Issuer: "mcpgate"}},
+		slog.Default(),
+	)
+
+	token := buildM2MToken("https://external.example.com/")
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, newRequest(token))
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want 401", rec.Code)
+	}
+	if msg := bodyError(t, rec); msg != "invalid token" {
+		t.Errorf("error message: %q, want %q", msg, "invalid token")
+	}
+}
+
+func TestAuthenticate_M2M_Disabled_ExternalIssuer_Returns401(t *testing.T) {
+	mw := auth.Authenticate(
+		&mockValidator{},
+		nil, // M2M disabled
+		&mockSessionCache{},
+		config.AuthConfig{JWT: config.JWTConfig{Issuer: "mcpgate"}},
+		slog.Default(),
+	)
+
+	token := buildM2MToken("https://external.example.com/")
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, newRequest(token))
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want 401", rec.Code)
 	}
 }
