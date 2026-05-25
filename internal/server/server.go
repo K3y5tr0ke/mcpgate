@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -24,9 +25,12 @@ import (
 	"github.com/K3y5tr0ke/mcpgate/internal/auth/rbac"
 	samlpkg "github.com/K3y5tr0ke/mcpgate/internal/auth/saml"
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
+	"github.com/K3y5tr0ke/mcpgate/internal/logging"
+	logSinks "github.com/K3y5tr0ke/mcpgate/internal/logging/sinks"
 	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
 	pgstore "github.com/K3y5tr0ke/mcpgate/internal/store/postgres"
 	redisstore "github.com/K3y5tr0ke/mcpgate/internal/store/redis"
+	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
 // Server is the main HTTP server wrapping the chi router and all dependencies.
@@ -40,9 +44,16 @@ type Server struct {
 	samlHandlers   *samlpkg.Handlers
 	jwtManager     *jwtpkg.Manager
 	sessionCache   *redisstore.SessionCache
+	sessionStore   store.SessionStore
 	enforcer       *rbac.Enforcer
+	jwksValidator  *jwkspkg.Validator
+	auditStore     *pgstore.AuditLogStore
+	pipeline       *logging.Pipeline
+	walSink        *logSinks.WALSink // nil if WALPath == ""
+	serverStore    store.ServerStore
 	authMiddleware func(http.Handler) http.Handler
 	http           *http.Server
+	bgCancel       context.CancelFunc // stops background goroutines (eviction, cleanup, WAL)
 }
 
 // New builds a Server and wires the router.
@@ -54,6 +65,7 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 	roleStore := pgstore.NewRoleStore(db)
 	samlIDPStore := pgstore.NewSAMLIDPConfigStore(db)
 	jwksStore := pgstore.NewJWKSConfigStore(db)
+	auditStore := pgstore.NewAuditLogStore(db)
 	sessionCache := redisstore.NewSessionCache(redisClient)
 
 	jwtManager, err := jwtpkg.NewManager(cfg.Auth.JWT, logger)
@@ -97,18 +109,94 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 		return nil, fmt.Errorf("seed rbac policies: %w", err)
 	}
 
+	// Initialise audit log pipeline.
+	initHash, err := auditStore.LatestHashChain(context.Background())
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, fmt.Errorf("init hash chain: %w", err)
+	}
+	if initHash == "" {
+		initHash = cfg.Logging.Pipeline.HashChainSeed
+	}
+	if initHash == "" {
+		initHash = "genesis"
+	}
+
+	primarySink := logSinks.NewPostgresSink(auditStore)
+	var fallbackSink logging.Sink
+	var walSink *logSinks.WALSink
+	if cfg.Logging.Pipeline.WALPath != "" {
+		walSink = logSinks.NewWALSink(cfg.Logging.Pipeline.WALPath, logger)
+		fallbackSink = walSink
+	}
+
+	pipeline := logging.NewPipeline(cfg.Logging.Pipeline, primarySink, fallbackSink, initHash, logger)
+
+	// Start the pipeline with context.Background() so the final Drain() flush
+	// succeeds even after the server's lifecycle context is cancelled.
+	pipeline.Start(context.Background())
+
+	// Background goroutines use a cancellable context stopped in Shutdown/Run.
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	go jwksValidator.Start(bgCtx)
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				n, err := sessionStore.DeleteExpired(bgCtx)
+				if err != nil {
+					logger.Warn("session cleanup failed", "err", err)
+				} else {
+					logger.Info("session cleanup", "deleted", n)
+				}
+			case <-bgCtx.Done():
+				return
+			}
+		}
+	}()
+	if walSink != nil {
+		primary := logSinks.NewPostgresSink(auditStore)
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if walSink.HasContent() {
+						if err := walSink.Replay(bgCtx, primary); err != nil {
+							logger.Error("WAL replay failed", "err", err)
+						}
+					}
+				case <-bgCtx.Done():
+					return
+				}
+			}
+		}()
+	}
+
 	s := &Server{
 		cfg:            cfg,
 		logger:         logger,
 		db:             db,
 		redis:          redisClient,
 		proxyHandler:   proxy.NewHandler(cfg.Proxy, serverStore, logger),
-		adminRouter:    api.NewRouter(serverStore, samlIDPStore, jwksStore, roleStore, userStore, enforcer, logger),
+		adminRouter: api.NewRouter(
+			serverStore, samlIDPStore, jwksStore, roleStore, userStore,
+			auditStore, pipeline, enforcer, logger,
+		),
 		samlHandlers:   samlHandlers,
 		jwtManager:     jwtManager,
 		sessionCache:   sessionCache,
+		sessionStore:   sessionStore,
 		enforcer:       enforcer,
+		jwksValidator:  jwksValidator,
+		auditStore:     auditStore,
+		pipeline:       pipeline,
+		walSink:        walSink,
+		serverStore:    serverStore,
 		authMiddleware: authMiddleware,
+		bgCancel:       bgCancel,
 	}
 
 	s.http = &http.Server{
@@ -156,9 +244,10 @@ func (s *Server) buildRouter() http.Handler {
 		})
 	})
 
-	// MCP proxy routes — auth then RBAC enforcement.
+	// MCP proxy routes — auth, RBAC enforcement, then audit logging.
 	r.Route("/mcp/{serverName}", func(r chi.Router) {
 		r.Use(s.authMiddleware)
+		r.Use(logging.Middleware(s.pipeline, s.serverStore))
 		r.Use(rbac.Authorize(s.enforcer, s.logger))
 		r.Post("/message", s.proxyHandler.HandleStreamableHTTP)
 		r.Get("/sse", s.proxyHandler.HandleSSEStream)
@@ -222,15 +311,22 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 // Handler returns the HTTP handler. Used by integration tests.
 func (s *Server) Handler() http.Handler { return s.http.Handler }
 
-// JWTManager returns the JWT manager. Used by integration tests to issue tokens
-// that the server's auth middleware will accept (same ephemeral signing key).
+// JWTManager returns the JWT manager. Used by integration tests.
 func (s *Server) JWTManager() *jwtpkg.Manager { return s.jwtManager }
 
-// Enforcer returns the RBAC enforcer. Used by integration tests to seed policies.
+// Enforcer returns the RBAC enforcer. Used by integration tests.
 func (s *Server) Enforcer() *rbac.Enforcer { return s.enforcer }
 
+// Shutdown stops background goroutines and drains the audit log pipeline.
+// Called automatically by Run() on signal; also safe to call from tests.
+func (s *Server) Shutdown() {
+	s.bgCancel()
+	s.pipeline.Drain()
+}
+
 // Run starts the HTTP server and blocks until a shutdown signal is received.
-// Graceful shutdown waits up to 30 seconds for in-flight requests to complete.
+// Graceful shutdown waits up to 30 seconds for in-flight requests, then calls
+// Shutdown() to stop background goroutines and drain the audit log pipeline.
 func (s *Server) Run() error {
 	ln, err := net.Listen("tcp", s.http.Addr)
 	if err != nil {
@@ -251,21 +347,26 @@ func (s *Server) Run() error {
 
 	select {
 	case err := <-errCh:
+		s.Shutdown()
 		return err
 	case sig := <-quit:
 		s.logger.Info("shutdown signal received", "signal", sig)
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
 
 	if err := s.http.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 
+	// Drain pipeline after all in-flight handlers have completed.
+	s.Shutdown()
+
 	s.logger.Info("server stopped")
 	return nil
 }
+
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

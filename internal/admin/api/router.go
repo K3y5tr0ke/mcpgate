@@ -8,18 +8,21 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/auth/rbac"
+	"github.com/K3y5tr0ke/mcpgate/internal/logging"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
 // Router is the admin REST API sub-router.
 type Router struct {
-	servers  store.ServerStore
-	idps     store.SAMLIDPConfigStore
-	jwks     store.JWKSConfigStore
-	roles    store.RoleStore
-	users    store.UserStore
-	enforcer *rbac.Enforcer
-	logger   *slog.Logger
+	servers    store.ServerStore
+	idps       store.SAMLIDPConfigStore
+	jwks       store.JWKSConfigStore
+	roles      store.RoleStore
+	users      store.UserStore
+	auditStore store.AuditLogStore
+	pipeline   *logging.Pipeline
+	enforcer   *rbac.Enforcer
+	logger     *slog.Logger
 }
 
 // NewRouter creates an admin API Router wired to the given stores.
@@ -29,17 +32,21 @@ func NewRouter(
 	jwks store.JWKSConfigStore,
 	roles store.RoleStore,
 	users store.UserStore,
+	auditStore store.AuditLogStore,
+	pipeline *logging.Pipeline,
 	enforcer *rbac.Enforcer,
 	logger *slog.Logger,
 ) *Router {
 	return &Router{
-		servers:  servers,
-		idps:     idps,
-		jwks:     jwks,
-		roles:    roles,
-		users:    users,
-		enforcer: enforcer,
-		logger:   logger,
+		servers:    servers,
+		idps:       idps,
+		jwks:       jwks,
+		roles:      roles,
+		users:      users,
+		auditStore: auditStore,
+		pipeline:   pipeline,
+		enforcer:   enforcer,
+		logger:     logger,
 	}
 }
 
@@ -53,6 +60,7 @@ func (rt *Router) Handler() http.Handler {
 	rh := &roleHandler{store: rt.roles, logger: rt.logger}
 	uh := &userHandler{store: rt.users, logger: rt.logger}
 	ph := &policyHandler{enforcer: rt.enforcer, logger: rt.logger}
+	lh := &logHandler{store: rt.auditStore, pipeline: rt.pipeline, logger: rt.logger}
 
 	r.Route("/servers", func(r chi.Router) {
 		r.Get("/", sh.list)
@@ -108,8 +116,9 @@ func (rt *Router) Handler() http.Handler {
 		r.Delete("/", ph.remove)
 	})
 
-	// Placeholder routes for later sprints.
-	r.Get("/logs", notImplemented)
+	r.Get("/logs", lh.list)
+	r.Get("/logs/export", lh.export)
+	r.Get("/logs/stream", lh.stream)
 	r.Get("/metrics", notImplemented)
 
 	return r

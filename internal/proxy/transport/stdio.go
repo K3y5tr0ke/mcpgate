@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -17,19 +18,23 @@ import (
 // Each Send() writes a message to stdin and blocks until the matching response
 // arrives (matched by JSON-RPC id). A background readLoop goroutine routes
 // responses to the waiting callers via per-id channels stored in pending.
+//
+// If the child process exits unexpectedly (not via Close()), the transport
+// resets itself so the next Send() transparently restarts the process.
 type Stdio struct {
 	command string
 	args    []string
 
-	procMu  sync.Mutex // guards proc lifecycle
+	procMu  sync.Mutex // guards proc, stdin, and done
 	proc    *exec.Cmd
 	stdin   io.WriteCloser
-	writeMu sync.Mutex // serialises stdin writes
+	done    chan struct{} // closed when the current process exits or Close() is called
+	writeMu sync.Mutex   // serialises stdin writes
 
 	pending sync.Map // idKey(string) -> chan []byte
 
-	closeOnce sync.Once
-	done      chan struct{}
+	closed     atomic.Bool // true once Close() has been called (intentional shutdown)
+	closeOnce  sync.Once   // ensures Close() only kills the process once
 }
 
 // NewStdio creates a Stdio transport. The process is started lazily on first Send.
@@ -65,12 +70,17 @@ func (t *Stdio) Send(ctx context.Context, message []byte) ([]byte, error) {
 		return nil, fmt.Errorf("stdio: write: %w", err)
 	}
 
+	// Snapshot done under procMu so the read is race-free with readLoop resets.
+	t.procMu.Lock()
+	done := t.done
+	t.procMu.Unlock()
+
 	select {
 	case resp := <-ch:
 		return resp, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-t.done:
+	case <-done:
 		return nil, fmt.Errorf("stdio: process exited")
 	}
 }
@@ -103,11 +113,17 @@ func (t *Stdio) Health(ctx context.Context) HealthStatus {
 }
 
 func (t *Stdio) Close() error {
+	t.closed.Store(true)
 	var err error
 	t.closeOnce.Do(func() {
-		close(t.done)
 		t.procMu.Lock()
 		defer t.procMu.Unlock()
+		// Close done only if it hasn't been closed by readLoop already.
+		select {
+		case <-t.done:
+		default:
+			close(t.done)
+		}
 		if t.stdin != nil {
 			_ = t.stdin.Close()
 		}
@@ -149,6 +165,10 @@ func (t *Stdio) ensureRunning() error {
 
 // readLoop reads newline-delimited JSON from stdout and routes each message
 // to the pending channel for its id.
+//
+// When the scanner exits (process died), readLoop checks whether the shutdown
+// was intentional (Close() was called). If not, it resets the transport state
+// so the next Send() can restart the process automatically.
 func (t *Stdio) readLoop(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
@@ -170,10 +190,20 @@ func (t *Stdio) readLoop(r io.Reader) {
 			}
 		}
 	}
-	// Signal all pending callers that the process has exited.
-	select {
-	case <-t.done:
-	default:
-		close(t.done)
+
+	if t.closed.Load() {
+		// Intentional shutdown — Close() already closed t.done or will momentarily.
+		return
 	}
+
+	// Unexpected exit: unblock pending callers on the current done channel, then
+	// reset state so the next ensureRunning() can spawn a fresh process.
+	t.procMu.Lock()
+	oldDone := t.done
+	t.done = make(chan struct{}) // fresh channel for the next process lifecycle
+	t.proc = nil
+	t.stdin = nil
+	t.procMu.Unlock()
+
+	close(oldDone) // wake all Send() callers that are blocked waiting for this process
 }

@@ -15,6 +15,7 @@ import (
 	pgstore "github.com/K3y5tr0ke/mcpgate/internal/store/postgres"
 	redisstore "github.com/K3y5tr0ke/mcpgate/internal/store/redis"
 	"github.com/K3y5tr0ke/mcpgate/internal/testutil"
+	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
 // testServer wraps a real server.Server running inside an httptest.Server.
@@ -28,6 +29,7 @@ type testServer struct {
 	jwksStore    *pgstore.JWKSConfigStore
 	idpStore     *pgstore.SAMLIDPConfigStore
 	roleStore    *pgstore.RoleStore
+	auditStore   store.AuditLogStore
 	srv          *server.Server
 }
 
@@ -58,6 +60,7 @@ func newTestServer(t *testing.T) *testServer {
 
 	// Replace the placeholder handler with the real server handler.
 	httpSrv.Config.Handler = srv.Handler()
+	t.Cleanup(srv.Shutdown)
 
 	return &testServer{
 		t:            t,
@@ -70,6 +73,7 @@ func newTestServer(t *testing.T) *testServer {
 		jwksStore:    pgstore.NewJWKSConfigStore(db),
 		idpStore:     pgstore.NewSAMLIDPConfigStore(db),
 		roleStore:    pgstore.NewRoleStore(db),
+		auditStore:   pgstore.NewAuditLogStore(db),
 		srv:          srv,
 	}
 }
@@ -118,6 +122,18 @@ func buildTestConfig(baseURL string) *config.Config {
 		RBAC: config.RBACConfig{
 			DefaultAction: "deny",
 			CacheTTL:      30 * time.Second,
+		},
+		Logging: config.LoggingConfig{
+			Level:  "info",
+			Format: "json",
+			Pipeline: config.PipelineConfig{
+				BufferSize:    1000,
+				FlushInterval: 20 * time.Millisecond,
+				BatchSize:     100,
+				WriterCount:   1,
+				HashChainSeed: "test-genesis",
+			},
+			Retention: config.RetentionConfig{HotDays: 30, WarmDays: 90},
 		},
 		Proxy: config.ProxyConfig{
 			DefaultTimeout: 10 * time.Second,

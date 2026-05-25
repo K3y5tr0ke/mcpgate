@@ -140,7 +140,9 @@ type PipelineConfig struct {
 	BufferSize    int           `koanf:"buffer_size"`
 	FlushInterval time.Duration `koanf:"flush_interval"`
 	BatchSize     int           `koanf:"batch_size"`
-	WriterCount   int           `koanf:"writer_count"`
+	WriterCount   int           `koanf:"writer_count"` // reserved; pipeline currently uses a single writer
+	WALPath       string        `koanf:"wal_path"`       // "" = no WAL fallback
+	HashChainSeed string        `koanf:"hash_chain_seed"` // sentinel prev-hash for first entry
 }
 
 type RetentionConfig struct {
@@ -256,6 +258,8 @@ func defaults() *Config {
 				FlushInterval: 100 * time.Millisecond,
 				BatchSize:     500,
 				WriterCount:   4,
+				WALPath:       "",
+				HashChainSeed: "genesis",
 			},
 			Retention: RetentionConfig{
 				HotDays:  30,

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -24,15 +25,22 @@ type m2mClaims struct {
 	Permissions []string `json:"permissions"`
 }
 
+// clientEntry wraps a Client with an access timestamp for LRU eviction.
+type clientEntry struct {
+	client   *Client
+	lastUsed atomic.Int64 // UnixNano of most recent clientFor() call
+}
+
 // Validator validates externally-issued JWTs using JWKS from configured issuers.
-// One Client per issuer is created lazily and cached for the process lifetime.
+// One Client per issuer is created lazily and cached; stale entries are evicted
+// by the Start() goroutine to prevent unbounded memory growth.
 type Validator struct {
 	store     store.JWKSConfigStore
 	clientTTL time.Duration
 	logger    *slog.Logger
 
 	mu      sync.RWMutex
-	clients map[string]*Client // issuer → Client
+	clients map[string]*clientEntry // issuer → entry
 }
 
 // NewValidator creates a Validator backed by the given store.
@@ -41,7 +49,39 @@ func NewValidator(s store.JWKSConfigStore, clientTTL time.Duration, logger *slog
 		store:     s,
 		clientTTL: clientTTL,
 		logger:    logger,
-		clients:   make(map[string]*Client),
+		clients:   make(map[string]*clientEntry),
+	}
+}
+
+// Start launches the client-map eviction goroutine. It stops when ctx is cancelled.
+// Call this once from server.Run().
+func (v *Validator) Start(ctx context.Context) {
+	evictInterval := v.clientTTL * 3
+	if evictInterval < time.Hour {
+		evictInterval = time.Hour
+	}
+	ticker := time.NewTicker(evictInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			v.evict()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// evict removes clientEntry records that have not been used for 3× clientTTL.
+func (v *Validator) evict() {
+	cutoff := time.Now().Add(-v.clientTTL * 3).UnixNano()
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	for issuer, entry := range v.clients {
+		if entry.lastUsed.Load() < cutoff {
+			delete(v.clients, issuer)
+			v.logger.Info("jwks: evicted stale client", "issuer", issuer)
+		}
 	}
 }
 
@@ -106,23 +146,27 @@ func (v *Validator) ValidateToken(ctx context.Context, tokenStr string) (*auth.U
 	}, nil
 }
 
-// clientFor returns the cached Client for the given issuer, creating one if needed.
+// clientFor returns the cached Client for the given issuer, creating one if needed,
+// and stamps lastUsed so the eviction goroutine can age out stale entries.
 func (v *Validator) clientFor(issuer, jwksURL string) *Client {
 	v.mu.RLock()
-	if c, ok := v.clients[issuer]; ok {
+	if entry, ok := v.clients[issuer]; ok {
+		entry.lastUsed.Store(time.Now().UnixNano())
 		v.mu.RUnlock()
-		return c
+		return entry.client
 	}
 	v.mu.RUnlock()
 
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if c, ok := v.clients[issuer]; ok {
-		return c
+	if entry, ok := v.clients[issuer]; ok {
+		entry.lastUsed.Store(time.Now().UnixNano())
+		return entry.client
 	}
-	c := NewClient(jwksURL, v.clientTTL)
-	v.clients[issuer] = c
-	return c
+	entry := &clientEntry{client: NewClient(jwksURL, v.clientTTL)}
+	entry.lastUsed.Store(time.Now().UnixNano())
+	v.clients[issuer] = entry
+	return entry.client
 }
 
 // peekClaim base64url-decodes the JWT payload and returns the named string claim.

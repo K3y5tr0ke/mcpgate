@@ -35,7 +35,7 @@ type AuditLogStore interface {
 	BatchInsert(ctx context.Context, entries []AuditLogEntry) error
 	Query(ctx context.Context, filter LogFilter, page Pagination) ([]AuditLogEntry, int64, error)
 	Export(ctx context.Context, filter LogFilter, format string, w io.Writer) error
-	VerifyHashChain(ctx context.Context, from, to time.Time) (bool, error)
+	VerifyHashChain(ctx context.Context, from, to time.Time, genesisHash string) (bool, error)
 }
 
 // SessionStore manages durable session records in PostgreSQL (Redis is the cache).

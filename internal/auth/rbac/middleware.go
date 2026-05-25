@@ -31,18 +31,25 @@ func Authorize(enforcer *Enforcer, logger *slog.Logger) func(http.Handler) http.
 				// SSE stream open — no body, enforce the "connect" action.
 				action = "connect"
 			} else {
-				buf, err := io.ReadAll(r.Body)
-				if err != nil {
-					writeJSONError(w, http.StatusBadRequest, "failed to read request body")
-					return
-				}
-				r.Body = io.NopCloser(bytes.NewReader(buf))
-
-				msg, parseErr := proxy.Parse(buf)
-				if parseErr != nil || msg == nil {
-					action = "unknown"
-				} else {
+				// Logging middleware pre-parses the body and stores the message in
+				// context; use it if available to avoid a second body read.
+				if msg := proxy.MessageFromContext(r.Context()); msg != nil {
 					action = proxy.Action(msg.Method)
+				} else {
+					buf, err := io.ReadAll(r.Body)
+					if err != nil {
+						writeJSONError(w, http.StatusBadRequest, "failed to read request body")
+						return
+					}
+					r.Body = io.NopCloser(bytes.NewReader(buf))
+
+					msg, parseErr := proxy.Parse(buf)
+					if parseErr != nil || msg == nil {
+						action = "unknown"
+					} else {
+						action = proxy.Action(msg.Method)
+						r = r.WithContext(proxy.WithMessage(r.Context(), msg))
+					}
 				}
 			}
 

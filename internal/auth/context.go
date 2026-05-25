@@ -37,3 +37,11 @@ func MustIdentity(ctx context.Context) UserIdentity {
 	}
 	return id
 }
+
+// IdentityFromContextOrZero returns the UserIdentity from ctx, or a zero-value
+// UserIdentity if none is set. Used by the logging middleware on routes where
+// auth is not enforced (e.g. health checks).
+func IdentityFromContextOrZero(ctx context.Context) UserIdentity {
+	id, _ := IdentityFromContext(ctx)
+	return id
+}
