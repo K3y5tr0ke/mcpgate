@@ -106,42 +106,42 @@ type SAMLIDPConfigStore interface {
 // --- Domain types ---
 
 type User struct {
-	ID          uuid.UUID      `db:"id"`
-	Email       string         `db:"email"`
-	DisplayName string         `db:"display_name"`
-	IDPSubject  string         `db:"idp_subject"`
-	IDPName     string         `db:"idp_name"`
-	Status      string         `db:"status"` // active, suspended, deactivated
-	Metadata    map[string]any `db:"metadata"`
-	CreatedAt   time.Time      `db:"created_at"`
-	UpdatedAt   time.Time      `db:"updated_at"`
+	ID          uuid.UUID      `db:"id"           json:"id"`
+	Email       string         `db:"email"        json:"email"`
+	DisplayName string         `db:"display_name" json:"display_name"`
+	IDPSubject  string         `db:"idp_subject"  json:"idp_subject"`
+	IDPName     string         `db:"idp_name"     json:"idp_name"`
+	Status      string         `db:"status"       json:"status"`
+	Metadata    map[string]any `db:"metadata"     json:"metadata"`
+	CreatedAt   time.Time      `db:"created_at"   json:"created_at,omitempty"`
+	UpdatedAt   time.Time      `db:"updated_at"   json:"updated_at,omitempty"`
 }
 
 type Role struct {
-	ID          uuid.UUID `db:"id"`
-	Name        string    `db:"name"`
-	Description string    `db:"description"`
-	IsSystem    bool      `db:"is_system"`
-	CreatedAt   time.Time `db:"created_at"`
+	ID          uuid.UUID `db:"id"          json:"id"`
+	Name        string    `db:"name"        json:"name"`
+	Description string    `db:"description" json:"description"`
+	IsSystem    bool      `db:"is_system"   json:"is_system"`
+	CreatedAt   time.Time `db:"created_at"  json:"created_at,omitempty"`
 }
 
 type MCPServer struct {
-	ID          uuid.UUID      `db:"id"`
-	Name        string         `db:"name"`
-	Description string         `db:"description"`
-	Transport   string         `db:"transport"` // streamable_http, sse, stdio
-	Config      map[string]any `db:"config"`
-	HealthCheck map[string]any `db:"health_check"`
-	IsEnabled   bool           `db:"is_enabled"`
-	CreatedAt   time.Time      `db:"created_at"`
-	UpdatedAt   time.Time      `db:"updated_at"`
+	ID          uuid.UUID      `db:"id"           json:"id"`
+	Name        string         `db:"name"         json:"name"`
+	Description string         `db:"description"  json:"description"`
+	Transport   string         `db:"transport"    json:"transport"`
+	Config      map[string]any `db:"config"       json:"config"`
+	HealthCheck map[string]any `db:"health_check"  json:"health_check"`
+	IsEnabled   bool           `db:"is_enabled"   json:"is_enabled"`
+	CreatedAt   time.Time      `db:"created_at"   json:"created_at,omitempty"`
+	UpdatedAt   time.Time      `db:"updated_at"   json:"updated_at,omitempty"`
 }
 
 type ServerTool struct {
-	ServerID    uuid.UUID      `db:"server_id"`
-	ToolName    string         `db:"tool_name"`
-	Description string         `db:"description"`
-	InputSchema map[string]any `db:"input_schema"`
+	ServerID    uuid.UUID      `db:"server_id"   json:"server_id"`
+	ToolName    string         `db:"tool_name"   json:"tool_name"`
+	Description string         `db:"description" json:"description"`
+	InputSchema map[string]any `db:"input_schema" json:"input_schema"`
 }
 
 type AuditLogEntry struct {
@@ -222,29 +222,29 @@ type RateLimitResult struct {
 }
 
 type SAMLIDPConfig struct {
-	ID           uuid.UUID         `db:"id"`
-	Name         string            `db:"name"`
-	EntityID     string            `db:"entity_id"`
-	SSOURL       string            `db:"sso_url"`
-	SLOURL       *string           `db:"slo_url"` // nullable
-	Certificate  string            `db:"certificate"`
-	AttributeMap map[string]string `db:"attribute_map"`  // JSONB
-	GroupRoleMap map[string]string `db:"group_role_map"` // JSONB
-	IsEnabled    bool              `db:"is_enabled"`
-	CreatedAt    time.Time         `db:"created_at"`
-	UpdatedAt    time.Time         `db:"updated_at"`
+	ID           uuid.UUID         `db:"id"            json:"id"`
+	Name         string            `db:"name"          json:"name"`
+	EntityID     string            `db:"entity_id"     json:"entity_id"`
+	SSOURL       string            `db:"sso_url"       json:"sso_url"`
+	SLOURL       *string           `db:"slo_url"       json:"slo_url"`
+	Certificate  string            `db:"certificate"   json:"certificate"`
+	AttributeMap map[string]string `db:"attribute_map"  json:"attribute_map"`
+	GroupRoleMap map[string]string `db:"group_role_map" json:"group_role_map"`
+	IsEnabled    bool              `db:"is_enabled"    json:"is_enabled"`
+	CreatedAt    time.Time         `db:"created_at"    json:"created_at,omitempty"`
+	UpdatedAt    time.Time         `db:"updated_at"    json:"updated_at,omitempty"`
 }
 
 // JWKSConfig represents a trusted external JWT issuer.
 // The Issuer field is matched exactly against the JWT iss claim.
 // Audience == "" means skip the audience check.
 type JWKSConfig struct {
-	ID        uuid.UUID `db:"id"`
-	Name      string    `db:"name"`
-	Issuer    string    `db:"issuer"`
-	JWKSURL   string    `db:"jwks_url"`
-	Audience  string    `db:"audience"`
-	IsEnabled bool      `db:"is_enabled"`
-	CreatedAt time.Time `db:"created_at"`
-	UpdatedAt time.Time `db:"updated_at"`
+	ID        uuid.UUID `db:"id"         json:"id"`
+	Name      string    `db:"name"       json:"name"`
+	Issuer    string    `db:"issuer"     json:"issuer"`
+	JWKSURL   string    `db:"jwks_url"   json:"jwks_url"`
+	Audience  string    `db:"audience"   json:"audience"`
+	IsEnabled bool      `db:"is_enabled" json:"is_enabled"`
+	CreatedAt time.Time `db:"created_at" json:"created_at,omitempty"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at,omitempty"`
 }

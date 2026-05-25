@@ -314,24 +314,27 @@ func (h *Handlers) Metadata(w http.ResponseWriter, r *http.Request) {
 }
 
 // Logout invalidates the current session and clears the session cookie.
+// Accepts the token from the mcpgate_session cookie (browser) or an
+// Authorization: Bearer header (API / programmatic clients).
 // GET /auth/saml/logout
 func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("mcpgate_session")
-	if err != nil {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
+	tokenStr := ""
+	if cookie, err := r.Cookie("mcpgate_session"); err == nil {
+		tokenStr = cookie.Value
+	} else if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		tokenStr = strings.TrimPrefix(auth, "Bearer ")
 	}
 
-	// Parse JWT ignoring expiry — we want to clean up even expired tokens.
-	claims, err := h.jwtManager.Validate(cookie.Value)
-	if err == nil {
-		sessionID, parseErr := uuid.Parse(claims.SessionID)
-		if parseErr == nil {
-			if delErr := h.sessionCache.Delete(r.Context(), sessionID); delErr != nil {
-				h.logger.Warn("logout: delete session cache", "err", delErr)
-			}
-			if delErr := h.sessionStore.Delete(r.Context(), sessionID); delErr != nil {
-				h.logger.Warn("logout: delete session store", "err", delErr)
+	if tokenStr != "" {
+		// Parse JWT ignoring expiry — we want to clean up even expired tokens.
+		if claims, err := h.jwtManager.Validate(tokenStr); err == nil {
+			if sessionID, parseErr := uuid.Parse(claims.SessionID); parseErr == nil {
+				if delErr := h.sessionCache.Delete(r.Context(), sessionID); delErr != nil {
+					h.logger.Warn("logout: delete session cache", "err", delErr)
+				}
+				if delErr := h.sessionStore.Delete(r.Context(), sessionID); delErr != nil {
+					h.logger.Warn("logout: delete session store", "err", delErr)
+				}
 			}
 		}
 	}

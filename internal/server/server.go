@@ -21,6 +21,7 @@ import (
 	"github.com/K3y5tr0ke/mcpgate/internal/auth"
 	jwkspkg "github.com/K3y5tr0ke/mcpgate/internal/auth/jwks"
 	jwtpkg "github.com/K3y5tr0ke/mcpgate/internal/auth/jwt"
+	"github.com/K3y5tr0ke/mcpgate/internal/auth/rbac"
 	samlpkg "github.com/K3y5tr0ke/mcpgate/internal/auth/saml"
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
 	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
@@ -39,6 +40,7 @@ type Server struct {
 	samlHandlers   *samlpkg.Handlers
 	jwtManager     *jwtpkg.Manager
 	sessionCache   *redisstore.SessionCache
+	enforcer       *rbac.Enforcer
 	authMiddleware func(http.Handler) http.Handler
 	http           *http.Server
 }
@@ -86,16 +88,26 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 
 	authMiddleware := auth.Authenticate(jwtManager, jwksValidator, sessionCache, cfg.Auth, logger)
 
+	policyCache := redisstore.NewPolicyCache(redisClient)
+	enforcer, err := rbac.NewEnforcer(db, policyCache, cfg.RBAC, logger)
+	if err != nil {
+		return nil, fmt.Errorf("init rbac enforcer: %w", err)
+	}
+	if err := enforcer.SeedDefaultPolicies(context.Background()); err != nil {
+		return nil, fmt.Errorf("seed rbac policies: %w", err)
+	}
+
 	s := &Server{
 		cfg:            cfg,
 		logger:         logger,
 		db:             db,
 		redis:          redisClient,
 		proxyHandler:   proxy.NewHandler(cfg.Proxy, serverStore, logger),
-		adminRouter:    api.NewRouter(serverStore, samlIDPStore, jwksStore, logger),
+		adminRouter:    api.NewRouter(serverStore, samlIDPStore, jwksStore, roleStore, userStore, enforcer, logger),
 		samlHandlers:   samlHandlers,
 		jwtManager:     jwtManager,
 		sessionCache:   sessionCache,
+		enforcer:       enforcer,
 		authMiddleware: authMiddleware,
 	}
 
@@ -130,17 +142,33 @@ func (s *Server) buildRouter() http.Handler {
 		r.Get("/logout", s.samlHandlers.Logout)
 	})
 
-	// MCP proxy routes — protected by JWT middleware.
+	// Identity endpoint — auth only, no role required.
+	r.Group(func(r chi.Router) {
+		r.Use(s.authMiddleware)
+		r.Get("/api/v1/me", func(w http.ResponseWriter, r *http.Request) {
+			identity := auth.MustIdentity(r.Context())
+			writeJSON(w, http.StatusOK, map[string]any{
+				"user_id":    identity.UserID,
+				"email":      identity.Email,
+				"roles":      identity.Roles,
+				"session_id": identity.SessionID,
+			})
+		})
+	})
+
+	// MCP proxy routes — auth then RBAC enforcement.
 	r.Route("/mcp/{serverName}", func(r chi.Router) {
 		r.Use(s.authMiddleware)
+		r.Use(rbac.Authorize(s.enforcer, s.logger))
 		r.Post("/message", s.proxyHandler.HandleStreamableHTTP)
 		r.Get("/sse", s.proxyHandler.HandleSSEStream)
 		r.Post("/sse", s.proxyHandler.HandleSSEMessage)
 	})
 
-	// Admin REST API — protected by JWT middleware.
+	// Admin REST API — auth then admin role check (no Casbin).
 	r.Group(func(r chi.Router) {
 		r.Use(s.authMiddleware)
+		r.Use(rbac.RequireRole("admin", s.logger))
 		r.Mount("/api/v1/admin", s.adminRouter.Handler())
 	})
 
@@ -190,6 +218,16 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+// Handler returns the HTTP handler. Used by integration tests.
+func (s *Server) Handler() http.Handler { return s.http.Handler }
+
+// JWTManager returns the JWT manager. Used by integration tests to issue tokens
+// that the server's auth middleware will accept (same ephemeral signing key).
+func (s *Server) JWTManager() *jwtpkg.Manager { return s.jwtManager }
+
+// Enforcer returns the RBAC enforcer. Used by integration tests to seed policies.
+func (s *Server) Enforcer() *rbac.Enforcer { return s.enforcer }
 
 // Run starts the HTTP server and blocks until a shutdown signal is received.
 // Graceful shutdown waits up to 30 seconds for in-flight requests to complete.

@@ -7,20 +7,40 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/K3y5tr0ke/mcpgate/internal/auth/rbac"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
 // Router is the admin REST API sub-router.
 type Router struct {
-	servers store.ServerStore
-	idps    store.SAMLIDPConfigStore
-	jwks    store.JWKSConfigStore
-	logger  *slog.Logger
+	servers  store.ServerStore
+	idps     store.SAMLIDPConfigStore
+	jwks     store.JWKSConfigStore
+	roles    store.RoleStore
+	users    store.UserStore
+	enforcer *rbac.Enforcer
+	logger   *slog.Logger
 }
 
 // NewRouter creates an admin API Router wired to the given stores.
-func NewRouter(servers store.ServerStore, idps store.SAMLIDPConfigStore, jwks store.JWKSConfigStore, logger *slog.Logger) *Router {
-	return &Router{servers: servers, idps: idps, jwks: jwks, logger: logger}
+func NewRouter(
+	servers store.ServerStore,
+	idps store.SAMLIDPConfigStore,
+	jwks store.JWKSConfigStore,
+	roles store.RoleStore,
+	users store.UserStore,
+	enforcer *rbac.Enforcer,
+	logger *slog.Logger,
+) *Router {
+	return &Router{
+		servers:  servers,
+		idps:     idps,
+		jwks:     jwks,
+		roles:    roles,
+		users:    users,
+		enforcer: enforcer,
+		logger:   logger,
+	}
 }
 
 // Handler returns the chi http.Handler for all /api/v1/admin routes.
@@ -30,6 +50,9 @@ func (rt *Router) Handler() http.Handler {
 	sh := &serverHandler{servers: rt.servers, logger: rt.logger}
 	ih := &idpHandler{idps: rt.idps, logger: rt.logger}
 	jh := &jwksHandler{store: rt.jwks, logger: rt.logger}
+	rh := &roleHandler{store: rt.roles, logger: rt.logger}
+	uh := &userHandler{store: rt.users, logger: rt.logger}
+	ph := &policyHandler{enforcer: rt.enforcer, logger: rt.logger}
 
 	r.Route("/servers", func(r chi.Router) {
 		r.Get("/", sh.list)
@@ -61,9 +84,31 @@ func (rt *Router) Handler() http.Handler {
 		})
 	})
 
+	r.Route("/roles", func(r chi.Router) {
+		r.Get("/", rh.list)
+		r.Post("/", rh.create)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", rh.get)
+			r.Put("/", rh.update)
+			r.Delete("/", rh.delete)
+			r.Post("/users", rh.assign)
+			r.Delete("/users/{userID}", rh.revoke)
+		})
+	})
+
+	r.Route("/users", func(r chi.Router) {
+		r.Get("/", uh.list)
+		r.Get("/{id}", uh.get)
+		r.Patch("/{id}", uh.patch)
+	})
+
+	r.Route("/policies", func(r chi.Router) {
+		r.Get("/", ph.list)
+		r.Post("/", ph.add)
+		r.Delete("/", ph.remove)
+	})
+
 	// Placeholder routes for later sprints.
-	r.Get("/users", notImplemented)
-	r.Get("/roles", notImplemented)
 	r.Get("/logs", notImplemented)
 	r.Get("/metrics", notImplemented)
 

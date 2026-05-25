@@ -85,12 +85,13 @@ func (s *SP) NewServiceProvider(idpCfg *store.SAMLIDPConfig) (*cssaml.ServicePro
 	}
 
 	sp := &cssaml.ServiceProvider{
-		EntityID:    s.cfg.EntityID,
-		Key:         s.key,
-		Certificate: s.cert,
-		AcsURL:      *acsURL,
-		MetadataURL: *metaURL,
-		IDPMetadata: idpMeta,
+		EntityID:          s.cfg.EntityID,
+		Key:               s.key,
+		Certificate:       s.cert,
+		AcsURL:            *acsURL,
+		MetadataURL:       *metaURL,
+		IDPMetadata:       idpMeta,
+		AllowIDPInitiated: true, // accept assertions without a prior SP-initiated request (replay detection guards against abuse)
 	}
 	return sp, nil
 }
