@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/proxy"

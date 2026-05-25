@@ -140,8 +140,8 @@ type PipelineConfig struct {
 	BufferSize    int           `koanf:"buffer_size"`
 	FlushInterval time.Duration `koanf:"flush_interval"`
 	BatchSize     int           `koanf:"batch_size"`
-	WriterCount   int           `koanf:"writer_count"` // reserved; pipeline currently uses a single writer
-	WALPath       string        `koanf:"wal_path"`       // "" = no WAL fallback
+	WriterCount   int           `koanf:"writer_count"`    // reserved; pipeline currently uses a single writer
+	WALPath       string        `koanf:"wal_path"`        // "" = no WAL fallback
 	HashChainSeed string        `koanf:"hash_chain_seed"` // sentinel prev-hash for first entry
 }
 

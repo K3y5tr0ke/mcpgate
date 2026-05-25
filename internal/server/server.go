@@ -28,9 +28,9 @@ import (
 	"github.com/K3y5tr0ke/mcpgate/internal/logging"
 	logSinks "github.com/K3y5tr0ke/mcpgate/internal/logging/sinks"
 	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
+	"github.com/K3y5tr0ke/mcpgate/internal/store"
 	pgstore "github.com/K3y5tr0ke/mcpgate/internal/store/postgres"
 	redisstore "github.com/K3y5tr0ke/mcpgate/internal/store/redis"
-	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
 // Server is the main HTTP server wrapping the chi router and all dependencies.
@@ -176,11 +176,11 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 	}
 
 	s := &Server{
-		cfg:            cfg,
-		logger:         logger,
-		db:             db,
-		redis:          redisClient,
-		proxyHandler:   proxy.NewHandler(cfg.Proxy, serverStore, logger),
+		cfg:          cfg,
+		logger:       logger,
+		db:           db,
+		redis:        redisClient,
+		proxyHandler: proxy.NewHandler(cfg.Proxy, serverStore, logger),
 		adminRouter: api.NewRouter(
 			serverStore, samlIDPStore, jwksStore, roleStore, userStore,
 			auditStore, pipeline, enforcer, logger,
@@ -366,7 +366,6 @@ func (s *Server) Run() error {
 	s.logger.Info("server stopped")
 	return nil
 }
-
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

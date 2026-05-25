@@ -29,12 +29,12 @@ type Stdio struct {
 	proc    *exec.Cmd
 	stdin   io.WriteCloser
 	done    chan struct{} // closed when the current process exits or Close() is called
-	writeMu sync.Mutex   // serialises stdin writes
+	writeMu sync.Mutex    // serialises stdin writes
 
 	pending sync.Map // idKey(string) -> chan []byte
 
-	closed     atomic.Bool // true once Close() has been called (intentional shutdown)
-	closeOnce  sync.Once   // ensures Close() only kills the process once
+	closed    atomic.Bool // true once Close() has been called (intentional shutdown)
+	closeOnce sync.Once   // ensures Close() only kills the process once
 }
 
 // NewStdio creates a Stdio transport. The process is started lazily on first Send.

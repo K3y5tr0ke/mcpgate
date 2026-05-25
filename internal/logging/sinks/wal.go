@@ -79,7 +79,7 @@ func (s *WALSink) Replay(ctx context.Context, primary Sink) error {
 		}
 		entries = append(entries, e)
 	}
-	f.Close() //nolint:errcheck
+	f.Close() //nolint:errcheck,gosec
 
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("wal: scan: %w", err)
