@@ -7,6 +7,13 @@
 
 set -euo pipefail
 
+# Load nvm so that npm/node are available in this non-interactive shell.
+# Git hooks don't source ~/.zshrc / ~/.bashrc, so version managers must be
+# bootstrapped explicitly.
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+# shellcheck source=/dev/null
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
