@@ -42,6 +42,23 @@ linters:
     exhaustive:
       default-signifies-exhaustive: true
 
+  exclusions:
+    # Test files: relax errcheck, gosec, unparam
+    rules:
+      - path: .*_test\.go
+        linters:
+          - gosec
+          - errcheck
+          - unparam
+      # Third-party Go code inside npm packages (no go.mod, picked up by ./...)
+      - path: .*/node_modules/.*
+        linters:
+          - gocritic
+          - govet
+    # Exclude npm package directories from analysis entirely
+    paths:
+      - .*/node_modules
+
 formatters:
   enable:
     - gofmt
@@ -51,26 +68,6 @@ formatters:
       local-prefixes:
         - github.com/K3y5tr0ke/mcpgate
 
-issues:
-  exclude-rules:
-    # Test files: relax errcheck, gosec, unparam
-    - path: .*_test\.go
-      linters:
-        - gosec
-        - errcheck
-        - unparam
-    # Third-party Go code vendored inside npm packages (no go.mod, picked up by ./...)
-    - path: node_modules
-      linters:
-        - gocritic
-        - exhaustive
-        - govet
-
-  max-issues-per-linter: 0
-  max-same-issues: 0
-
 run:
   timeout: 5m
   go: "1.26"
-  exclude-dirs:
-    - node_modules
