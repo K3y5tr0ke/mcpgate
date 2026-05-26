@@ -6,7 +6,7 @@ DATABASE_URL ?= postgres://mcpgate:devpassword@localhost:5432/mcpgate?sslmode=di
 MIGRATIONS  := internal/store/postgres/migrations
 BIN         := bin/mcpgate
 
-.PHONY: build build-docker dev dev-frontend \
+.PHONY: build build-web build-docker dev dev-frontend \
         test-unit test-integration test-coverage \
         lint lint-fix security-scan \
         migrate-up migrate-down migrate-create \
@@ -16,7 +16,10 @@ BIN         := bin/mcpgate
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
-build:
+build-web:
+	cd web && npm ci && npm run build
+
+build: build-web
 	CGO_ENABLED=0 $(GVM_GO) build -ldflags="-s -w" -o $(BIN) ./cmd/mcpgate
 
 build-docker:
@@ -111,14 +114,15 @@ install-hooks:
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 clean:
-	rm -rf bin/ coverage.out coverage.html
+	rm -rf bin/ coverage.out coverage.html web/dist/
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 
 help:
 	@echo "mcpgate Makefile targets"
 	@echo ""
-	@echo "  build              Compile binary to $(BIN)"
+	@echo "  build              Build web assets then compile binary to $(BIN)"
+	@echo "  build-web          Build the React admin console (web/dist/)"
 	@echo "  build-docker       Build production Docker image"
 	@echo "  dev                Run server with dev config (hot reload: use air if desired)"
 	@echo "  dev-all            Start Docker services + backend + frontend"

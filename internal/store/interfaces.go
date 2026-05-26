@@ -81,6 +81,21 @@ type RateLimiter interface {
 	Allow(ctx context.Context, key string, limit RateLimit) (RateLimitResult, error)
 }
 
+// RateLimitOverrideStore manages per-role RPM/RPD overrides stored in the database.
+type RateLimitOverrideStore interface {
+	GetByRole(ctx context.Context, roleName string) (*RateLimitOverrideEntry, error)
+	ListAll(ctx context.Context) ([]RateLimitOverrideEntry, error)
+	Upsert(ctx context.Context, entry *RateLimitOverrideEntry) error
+	Delete(ctx context.Context, roleName string) error
+}
+
+// SettingsStore manages mutable key-value configuration stored in the database.
+type SettingsStore interface {
+	GetAll(ctx context.Context) (map[string]any, error)
+	Get(ctx context.Context, key string) (any, error)
+	Set(ctx context.Context, key string, value any) error
+}
+
 // JWKSConfigStore manages trusted external JWT issuer configurations for M2M auth.
 type JWKSConfigStore interface {
 	Create(ctx context.Context, cfg *JWKSConfig) error
@@ -234,6 +249,16 @@ type SAMLIDPConfig struct {
 	IsEnabled    bool              `db:"is_enabled"    json:"is_enabled"`
 	CreatedAt    time.Time         `db:"created_at"    json:"created_at,omitempty"`
 	UpdatedAt    time.Time         `db:"updated_at"    json:"updated_at,omitempty"`
+}
+
+// RateLimitOverrideEntry is the database record for a per-role rate limit override.
+// RPM/RPD of 0 means "use the global default".
+type RateLimitOverrideEntry struct {
+	ID        uuid.UUID `db:"id"         json:"id"`
+	RoleName  string    `db:"role_name"  json:"role_name"`
+	RPM       int       `db:"rpm"        json:"rpm"`
+	RPD       int       `db:"rpd"        json:"rpd"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at,omitempty"`
 }
 
 // JWKSConfig represents a trusted external JWT issuer.

@@ -277,6 +277,23 @@ func (h *Handler) serverConfig(ctx context.Context, name string) (*store.MCPServ
 	return srv, nil
 }
 
+// ServerCircuitStates returns the current state of every circuit breaker that
+// has been lazily created. Returns an empty map if no requests have been made yet.
+func (h *Handler) ServerCircuitStates() map[string]string {
+	states := make(map[string]string)
+	h.breakers.Range(func(k, v any) bool {
+		states[k.(string)] = v.(*circuitbreaker.CircuitBreaker).State().String()
+		return true
+	})
+	return states
+}
+
+// BuildTransport creates a fresh transport.Transport for srv without caching it.
+// Used by the admin server-test endpoint to probe connectivity on demand.
+func (h *Handler) BuildTransport(srv *store.MCPServer) (transport.Transport, error) {
+	return h.buildTransport(srv)
+}
+
 // circuitBreakerFor returns the CircuitBreaker for serverName, creating one lazily.
 func (h *Handler) circuitBreakerFor(serverName string) *circuitbreaker.CircuitBreaker {
 	cb := circuitbreaker.New(h.proxyCfg.CircuitBreaker)

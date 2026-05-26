@@ -66,10 +66,15 @@ func New(cfg config.OTLPConfig, serviceName string) (*Provider, error) {
 		return nil, fmt.Errorf("tracing: create resource: %w", err)
 	}
 
+	sampler := sdktrace.Sampler(sdktrace.AlwaysSample())
+	if cfg.SampleRate > 0 && cfg.SampleRate < 1 {
+		sampler = sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRate))
+	}
+
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithSampler(sampler),
 	)
 
 	otel.SetTracerProvider(tp)

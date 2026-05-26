@@ -6,23 +6,29 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/auth/rbac"
 	"github.com/K3y5tr0ke/mcpgate/internal/logging"
+	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
 // Router is the admin REST API sub-router.
 type Router struct {
-	servers    store.ServerStore
-	idps       store.SAMLIDPConfigStore
-	jwks       store.JWKSConfigStore
-	roles      store.RoleStore
-	users      store.UserStore
-	auditStore store.AuditLogStore
-	pipeline   *logging.Pipeline
-	enforcer   *rbac.Enforcer
-	logger     *slog.Logger
+	servers      store.ServerStore
+	idps         store.SAMLIDPConfigStore
+	jwks         store.JWKSConfigStore
+	roles        store.RoleStore
+	users        store.UserStore
+	auditStore   store.AuditLogStore
+	settings     store.SettingsStore
+	pipeline     *logging.Pipeline
+	enforcer     *rbac.Enforcer
+	proxyHandler *proxy.Handler
+	collector    metricsProvider
+	db           *pgxpool.Pool
+	logger       *slog.Logger
 }
 
 // NewRouter creates an admin API Router wired to the given stores.
@@ -33,20 +39,28 @@ func NewRouter(
 	roles store.RoleStore,
 	users store.UserStore,
 	auditStore store.AuditLogStore,
+	settings store.SettingsStore,
 	pipeline *logging.Pipeline,
 	enforcer *rbac.Enforcer,
+	proxyHandler *proxy.Handler,
+	collector metricsProvider,
+	db *pgxpool.Pool,
 	logger *slog.Logger,
 ) *Router {
 	return &Router{
-		servers:    servers,
-		idps:       idps,
-		jwks:       jwks,
-		roles:      roles,
-		users:      users,
-		auditStore: auditStore,
-		pipeline:   pipeline,
-		enforcer:   enforcer,
-		logger:     logger,
+		servers:      servers,
+		idps:         idps,
+		jwks:         jwks,
+		roles:        roles,
+		users:        users,
+		auditStore:   auditStore,
+		settings:     settings,
+		pipeline:     pipeline,
+		enforcer:     enforcer,
+		proxyHandler: proxyHandler,
+		collector:    collector,
+		db:           db,
+		logger:       logger,
 	}
 }
 
@@ -54,13 +68,15 @@ func NewRouter(
 func (rt *Router) Handler() http.Handler {
 	r := chi.NewRouter()
 
-	sh := &serverHandler{servers: rt.servers, logger: rt.logger}
+	sh := &serverHandler{servers: rt.servers, proxyHandler: rt.proxyHandler, logger: rt.logger}
 	ih := &idpHandler{idps: rt.idps, logger: rt.logger}
 	jh := &jwksHandler{store: rt.jwks, logger: rt.logger}
 	rh := &roleHandler{store: rt.roles, logger: rt.logger}
 	uh := &userHandler{store: rt.users, logger: rt.logger}
 	ph := &policyHandler{enforcer: rt.enforcer, logger: rt.logger}
 	lh := &logHandler{store: rt.auditStore, pipeline: rt.pipeline, logger: rt.logger}
+	mh := &metricsHandler{collector: rt.collector, proxyHandler: rt.proxyHandler, db: rt.db, logger: rt.logger}
+	sth := &settingsHandler{store: rt.settings, logger: rt.logger}
 
 	r.Route("/servers", func(r chi.Router) {
 		r.Get("/", sh.list)
@@ -69,6 +85,7 @@ func (rt *Router) Handler() http.Handler {
 			r.Get("/", sh.get)
 			r.Put("/", sh.update)
 			r.Delete("/", sh.delete)
+			r.Post("/test", sh.test)
 		})
 	})
 
@@ -120,7 +137,12 @@ func (rt *Router) Handler() http.Handler {
 	r.Get("/logs/export", lh.export)
 	r.Get("/logs/stream", lh.stream)
 	r.Get("/logs/verify", lh.verify)
-	r.Get("/metrics", notImplemented)
+
+	r.Get("/metrics/summary", mh.summary)
+	r.Get("/metrics/timeseries", mh.timeseries)
+
+	r.Get("/settings", sth.get)
+	r.Put("/settings", sth.put)
 
 	return r
 }

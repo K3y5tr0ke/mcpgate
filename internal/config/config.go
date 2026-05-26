@@ -167,9 +167,18 @@ type MetricsConfig struct {
 }
 
 type OTLPConfig struct {
-	Enabled  bool   `koanf:"enabled"`
-	Endpoint string `koanf:"endpoint"`
-	Insecure bool   `koanf:"insecure"`
+	Enabled    bool    `koanf:"enabled"`
+	Endpoint   string  `koanf:"endpoint"`
+	Insecure   bool    `koanf:"insecure"`
+	SampleRate float64 `koanf:"sample_rate"` // 0 = AlwaysSample; 0 < r ≤ 1 = ParentBased(TraceIDRatioBased(r))
+}
+
+// RateLimitOverride holds a per-role RPM/RPD override stored in the database.
+// A value of 0 means "use the global default".
+type RateLimitOverride struct {
+	RoleName string `json:"role_name"`
+	RPM      int    `json:"rpm"`
+	RPD      int    `json:"rpd"`
 }
 
 type AdminConfig struct {

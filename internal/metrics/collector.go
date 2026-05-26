@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -13,6 +14,36 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
+
+// MinuteCounter tracks requests in the previous complete minute for dashboards.
+// It uses a fixed-window approach: when the current clock minute rolls over, the
+// previous window's count is saved and the current counter resets. No goroutines needed.
+type MinuteCounter struct {
+	mu    sync.Mutex
+	min   int   // clock minute (0-59) of current window
+	count int64 // requests in the current (incomplete) minute
+	prev  int64 // requests in the previous complete minute
+}
+
+func (c *MinuteCounter) Inc() {
+	m := time.Now().Minute()
+	c.mu.Lock()
+	if m != c.min {
+		c.prev = c.count
+		c.count = 0
+		c.min = m
+	}
+	c.count++
+	c.mu.Unlock()
+}
+
+// Rate returns the number of requests counted in the previous complete minute.
+func (c *MinuteCounter) Rate() int64 {
+	c.mu.Lock()
+	prev := c.prev
+	c.mu.Unlock()
+	return prev
+}
 
 // Collector holds all Prometheus metrics registered for mcpgate.
 // It uses a dedicated Registry (not the default global) so test instances
@@ -26,7 +57,8 @@ type Collector struct {
 	UpstreamErrors  *prometheus.CounterVec
 	AuthFailures    *prometheus.CounterVec
 
-	registry *prometheus.Registry
+	rpmCounter *MinuteCounter
+	registry   *prometheus.Registry
 }
 
 // NewCollector registers all metrics and returns a ready-to-use Collector.
@@ -70,7 +102,8 @@ func NewCollector() *Collector {
 			Help: "Authentication rejections by reason.",
 		}, []string{"reason"}),
 
-		registry: reg,
+		rpmCounter: &MinuteCounter{},
+		registry:   reg,
 	}
 
 	reg.MustRegister(
@@ -101,6 +134,14 @@ func (c *Collector) Handler() http.Handler {
 	return promhttp.HandlerFor(c.registry, promhttp.HandlerOpts{})
 }
 
+// Gatherer exposes the internal registry as a prometheus.Gatherer.
+// Used by the admin metrics summary endpoint to read histogram and counter data.
+func (c *Collector) Gatherer() prometheus.Gatherer { return c.registry }
+
+// RequestsLastMinute returns the number of requests counted in the previous
+// complete clock minute. Returns 0 until the first minute boundary passes.
+func (c *Collector) RequestsLastMinute() int64 { return c.rpmCounter.Rate() }
+
 // Middleware returns a chi-compatible middleware that records per-request metrics.
 // It must be placed inside the /mcp/{serverName} route group so chi can resolve
 // the serverName URL parameter.
@@ -110,6 +151,7 @@ func (c *Collector) Middleware() func(http.Handler) http.Handler {
 			server := chi.URLParam(r, "serverName")
 
 			c.ActiveRequests.WithLabelValues(server).Inc()
+			c.rpmCounter.Inc()
 			defer c.ActiveRequests.WithLabelValues(server).Dec()
 
 			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)

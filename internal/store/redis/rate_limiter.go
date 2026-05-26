@@ -90,6 +90,38 @@ func (r *RateLimiter) Allow(ctx context.Context, key string, limit store.RateLim
 	return store.RateLimitResult{Allowed: true}, nil
 }
 
+// StartConcurrent increments the per-user concurrent-connection counter and
+// checks it against limit. If the counter exceeds limit, it decrements
+// immediately and returns (over_limit=true, nil, nil). Otherwise it returns
+// (false, cleanup, nil) — the caller MUST defer cleanup() to decrement on disconnect.
+// A 5-minute TTL guards against counter leaks on unclean client disconnects.
+// Fail-open: Redis errors return (false, noop, err).
+func (r *RateLimiter) StartConcurrent(ctx context.Context, key string, limit int) (overLimit bool, cleanup func(), err error) {
+	if limit <= 0 {
+		return false, func() {}, nil
+	}
+
+	redisKey := "concurrent:" + key
+	ttl := 5 * time.Minute
+
+	count, incrErr := r.client.Incr(ctx, redisKey).Result()
+	if incrErr != nil {
+		return false, func() {}, fmt.Errorf("rate_limiter: concurrent incr: %w", incrErr)
+	}
+	// Refresh the TTL on every connection to keep the key alive.
+	r.client.Expire(ctx, redisKey, ttl) //nolint:errcheck
+
+	if int(count) > limit {
+		r.client.Decr(ctx, redisKey) //nolint:errcheck
+		return true, func() {}, nil
+	}
+
+	cleanup = func() {
+		r.client.Decr(context.Background(), redisKey) //nolint:errcheck
+	}
+	return false, cleanup, nil
+}
+
 // check runs the sliding-window Lua script for a single window (rpm or rpd).
 func (r *RateLimiter) check(
 	ctx context.Context,

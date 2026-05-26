@@ -74,6 +74,7 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 	samlIDPStore := pgstore.NewSAMLIDPConfigStore(db)
 	jwksStore := pgstore.NewJWKSConfigStore(db)
 	auditStore := pgstore.NewAuditLogStore(db)
+	settingsStore := pgstore.NewSettingsStore(db)
 	sessionCache := redisstore.NewSessionCache(redisClient)
 
 	jwtManager, err := jwtpkg.NewManager(cfg.Auth.JWT, logger)
@@ -268,7 +269,8 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 		proxyHandler: proxyHandler,
 		adminRouter: api.NewRouter(
 			serverStore, samlIDPStore, jwksStore, roleStore, userStore,
-			auditStore, pipeline, enforcer, logger,
+			auditStore, settingsStore, pipeline, enforcer,
+			proxyHandler, collector, db, logger,
 		),
 		samlHandlers:     samlHandlers,
 		jwtManager:       jwtManager,
@@ -356,6 +358,17 @@ func (s *Server) buildRouter() http.Handler {
 		r.Mount("/api/v1/admin", s.adminRouter.Handler())
 	})
 
+	// Admin console SPA — served at /console/* without auth middleware so that
+	// the browser can load the app before the JWT cookie is set.
+	// The SPA itself redirects unauthenticated users to /auth/saml/login.
+	r.Route("/console", func(r chi.Router) {
+		r.Handle("/*", consoleSPAHandler())
+	})
+	// Redirect bare /console to /console/dashboard.
+	r.Get("/console", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/console/dashboard", http.StatusFound)
+	})
+
 	return r
 }
 
@@ -428,6 +441,24 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 	components["pipeline"] = componentStatus{Status: pipelineStatus, Detail: fmt.Sprintf("dropped_total=%d", dropped)}
 
+	// Upstream circuit breaker states — non-critical.
+	type upstreamStatus struct {
+		Status       string `json:"status"`
+		CircuitState string `json:"circuit_state"`
+	}
+	circuitStates := s.proxyHandler.ServerCircuitStates()
+	upstreams := make(map[string]upstreamStatus, len(circuitStates))
+	for server, state := range circuitStates {
+		us := upstreamStatus{Status: "ok", CircuitState: state}
+		if state == "open" || state == "half-open" {
+			us.Status = "degraded"
+			if overall == "ok" {
+				overall = "degraded"
+			}
+		}
+		upstreams[server] = us
+	}
+
 	status := http.StatusOK
 	if overall == "error" {
 		status = http.StatusServiceUnavailable
@@ -435,6 +466,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, map[string]any{
 		"status":     overall,
 		"components": components,
+		"upstreams":  upstreams,
 	})
 }
 

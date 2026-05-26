@@ -1,0 +1,89 @@
+groups:
+  - name: mcpgate.circuit_breaker
+    interval: 30s
+    rules:
+      - alert: MCPGateCircuitBreakerOpen
+        expr: mcpgate_circuit_breaker_state == 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Circuit breaker open for MCP server {{ $labels.server }}"
+          description: >
+            The circuit breaker for upstream server {{ $labels.server }} has been
+            in the open state for more than 1 minute. Requests to that server are
+            fast-failing. Check upstream connectivity and error logs.
+
+      - alert: MCPGateCircuitBreakerHalfOpen
+        expr: mcpgate_circuit_breaker_state == 2
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "Circuit breaker half-open for MCP server {{ $labels.server }}"
+          description: >
+            The circuit breaker for {{ $labels.server }} is in half-open state
+            (probing recovery) for more than 5 minutes. If probes keep failing,
+            it will revert to open.
+
+  - name: mcpgate.rate_limiting
+    interval: 1m
+    rules:
+      - alert: MCPGateHighRateLimitHits
+        expr: rate(mcpgate_rate_limit_hits_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated rate limit rejections ({{ $labels.window }} window)"
+          description: >
+            More than 10 rate-limit rejections per second averaged over the last
+            5 minutes on the {{ $labels.window }} window. Consider raising the
+            default RPM/RPD or investigating client behaviour.
+
+  - name: mcpgate.pipeline
+    interval: 1m
+    rules:
+      - alert: MCPGateAuditPipelineDroppingEntries
+        expr: increase(mcpgate_audit_pipeline_dropped_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Audit log pipeline is dropping entries"
+          description: >
+            The in-memory audit log buffer is full and entries are being discarded.
+            Audit integrity is at risk. Check Postgres write latency, increase
+            pipeline.buffer_size, or scale the database.
+
+  - name: mcpgate.upstream_errors
+    interval: 1m
+    rules:
+      - alert: MCPGateHighUpstreamErrorRate
+        expr: >
+          rate(mcpgate_upstream_errors_total[5m])
+          / on(server) rate(mcpgate_requests_total[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High upstream error rate for server {{ $labels.server }}"
+          description: >
+            More than 10% of requests to {{ $labels.server }} are resulting in
+            upstream transport errors over the last 5 minutes.
+            Error type: {{ $labels.error_type }}.
+
+  - name: mcpgate.auth
+    interval: 1m
+    rules:
+      - alert: MCPGateAuthFailureSurge
+        expr: rate(mcpgate_auth_failures_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated authentication failures (reason: {{ $labels.reason }})"
+          description: >
+            More than 5 authentication failures per second over the last 5 minutes.
+            Reason: {{ $labels.reason }}. This may indicate a credential leak,
+            misconfigured client, or brute-force attempt.

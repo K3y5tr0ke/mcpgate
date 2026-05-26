@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+:root {
+  --color-brand: #4f46e5;
+  --color-brand-hover: #4338ca;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #f9fafb;
+  color: #111827;
+}
+
+#root {
+  min-height: 100svh;
+}

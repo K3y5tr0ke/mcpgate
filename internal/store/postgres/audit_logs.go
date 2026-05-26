@@ -91,6 +91,9 @@ func (s *AuditLogStore) BatchInsert(ctx context.Context, entries []store.AuditLo
 		)
 	}
 
+	sb.WriteString(`
+		ON CONFLICT (hash_chain) DO NOTHING`)
+
 	if _, err := s.db.Exec(ctx, sb.String(), args...); err != nil {
 		return fmt.Errorf("audit_logs: batch insert: %w", err)
 	}
@@ -277,9 +280,10 @@ func auditVerifyChain(entries []store.AuditLogEntry, prevHash string) (bool, err
 }
 
 // DeleteExpired deletes audit log entries older than hotDays days and returns
-// the number of rows removed. A hotDays value of 0 is a no-op.
+// the number of rows removed. hotDays=0 deletes all entries (useful for tests);
+// negative values are treated as a no-op.
 func (s *AuditLogStore) DeleteExpired(ctx context.Context, hotDays int) (int64, error) {
-	if hotDays <= 0 {
+	if hotDays < 0 {
 		return 0, nil
 	}
 	tag, err := s.db.Exec(ctx,
