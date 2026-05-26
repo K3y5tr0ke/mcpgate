@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -230,6 +231,79 @@ func TestE2E_AuditLog_HashChain_Intact(t *testing.T) {
 	}
 	if !ok {
 		t.Error("hash chain verification failed — entries may be out of order or tampered")
+	}
+}
+
+// TestE2E_AuditLog_VerifyEndpoint verifies the GET /api/v1/admin/logs/verify
+// HTTP endpoint returns {"ok": true} after a set of proxied requests whose
+// hash chain is intact.
+func TestE2E_AuditLog_VerifyEndpoint(t *testing.T) {
+	ts := newTestServer(t)
+	adminToken := ts.createAdminToken(t)
+
+	const numRequests = 3
+	for i := 0; i < numRequests; i++ {
+		resp := ts.do(t, http.MethodPost, "/mcp/any-server/message",
+			newJSONReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)),
+			map[string]string{
+				"Authorization": "Bearer " + adminToken,
+				"Content-Type":  "application/json",
+			},
+		)
+		resp.Body.Close() //nolint:errcheck
+	}
+
+	waitForAuditEntries(t, ts, store.LogFilter{MCPMethod: "tools/list"}, numRequests, 3*time.Second)
+
+	q := url.Values{}
+	q.Set("from", time.Now().Add(-time.Minute).UTC().Format(time.RFC3339))
+	q.Set("to", time.Now().Add(time.Minute).UTC().Format(time.RFC3339))
+	q.Set("genesis", "test-genesis")
+	path := "/api/v1/admin/logs/verify?" + q.Encode()
+
+	resp := ts.do(t, http.MethodGet, path, nil,
+		map[string]string{"Authorization": "Bearer " + adminToken},
+	)
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("verify endpoint: want 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode verify response: %v", err)
+	}
+	if ok, _ := result["ok"].(bool); !ok {
+		t.Errorf("verify endpoint returned ok=false or missing: %v", result)
+	}
+}
+
+// TestE2E_AuditLog_Retention_DeletesOldEntries verifies that DeleteExpired
+// removes entries when called with hotDays=0 (deletes everything older than now).
+func TestE2E_AuditLog_Retention_DeletesOldEntries(t *testing.T) {
+	ts := newTestServer(t)
+	adminToken := ts.createAdminToken(t)
+
+	resp := ts.do(t, http.MethodPost, "/mcp/any-server/message",
+		newJSONReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"ping"}`)),
+		map[string]string{
+			"Authorization": "Bearer " + adminToken,
+			"Content-Type":  "application/json",
+		},
+	)
+	resp.Body.Close() //nolint:errcheck
+
+	waitForAuditEntries(t, ts, store.LogFilter{MCPMethod: "ping"}, 1, 3*time.Second)
+
+	// hotDays=0 means "delete entries older than now()" — deletes all flushed entries.
+	n, err := ts.auditStore.DeleteExpired(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("DeleteExpired: %v", err)
+	}
+	if n == 0 {
+		t.Error("DeleteExpired(0) deleted 0 rows — expected at least 1")
 	}
 }
 

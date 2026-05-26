@@ -90,7 +90,48 @@ func (h *logHandler) export(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// verify handles GET /api/v1/admin/logs/verify?from=...&to=...&genesis=...
+// It re-derives the hash chain for all entries in [from, to] and reports
+// whether every entry's stored hash matches the recomputed value.
+func (h *logHandler) verify(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	from, err := time.Parse(time.RFC3339, q.Get("from"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid 'from' timestamp (RFC3339 required)")
+		return
+	}
+	to, err := time.Parse(time.RFC3339, q.Get("to"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid 'to' timestamp (RFC3339 required)")
+		return
+	}
+	if from.After(to) {
+		writeJSONError(w, http.StatusBadRequest, "'from' must be before 'to'")
+		return
+	}
+	genesis := q.Get("genesis")
+
+	ok, err := h.store.VerifyHashChain(r.Context(), from, to, genesis)
+	if err != nil {
+		h.logger.Error("verify hash chain failed", "err", err)
+		writeJSONError(w, http.StatusInternalServerError, "verification failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":   ok,
+		"from": from,
+		"to":   to,
+	})
+}
+
 // stream handles WS GET /api/v1/admin/logs/stream
+// Auth note: the RequireRole("admin") middleware runs before wsUpgrader.Upgrade,
+// so the WebSocket connection is never established for unauthenticated callers.
+// Browser clients authenticate via the mcpgate_session cookie (set by SAML ACS);
+// the auth middleware reads it as a fallback to the Authorization header.
+// A ?token= URL parameter is intentionally not supported — URL parameters appear
+// in server access logs, which would leak the bearer token.
 func (h *logHandler) stream(w http.ResponseWriter, r *http.Request) {
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {

@@ -7,17 +7,27 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
+	"github.com/K3y5tr0ke/mcpgate/internal/proxy/circuitbreaker"
 	"github.com/K3y5tr0ke/mcpgate/internal/proxy/transport"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
 const serverCacheTTL = 30 * time.Second
+
+// ProxyMetrics is an optional hook for recording circuit breaker state and
+// upstream error counts. Defined here as an interface to avoid an import cycle
+// with the metrics package, which imports proxy for MessageFromContext.
+type ProxyMetrics interface {
+	RecordCircuitState(server string, state float64)
+	RecordUpstreamError(server, errorType string)
+}
 
 // Handler is the core MCP proxy. It resolves an upstream server by name,
 // creates or reuses a Transport, then forwards JSON-RPC messages verbatim.
@@ -25,9 +35,13 @@ type Handler struct {
 	servers  store.ServerStore
 	proxyCfg config.ProxyConfig
 	logger   *slog.Logger
+	pm       ProxyMetrics // nil when metrics are disabled
 
 	// transport cache
 	transports sync.Map // key: server name → transport.Transport
+
+	// per-server circuit breakers (lazily created via LoadOrStore)
+	breakers sync.Map // key: server name → *circuitbreaker.CircuitBreaker
 
 	// server config cache (avoids a DB hit on every request)
 	cacheMu  sync.RWMutex
@@ -45,6 +59,9 @@ func NewHandler(cfg config.ProxyConfig, servers store.ServerStore, logger *slog.
 		cacheExp: make(map[string]time.Time),
 	}
 }
+
+// WithMetrics attaches a ProxyMetrics recorder. Called from server.New().
+func (h *Handler) WithMetrics(pm ProxyMetrics) { h.pm = pm }
 
 // HandleStreamableHTTP is the chi handler for POST /mcp/{serverName}/message.
 func (h *Handler) HandleStreamableHTTP(w http.ResponseWriter, r *http.Request) {
@@ -69,10 +86,18 @@ func (h *Handler) HandleStreamableHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := tr.Send(r.Context(), body)
+	resp, err := h.callWithCircuitBreaker(serverName, func() ([]byte, error) {
+		return tr.Send(r.Context(), body)
+	})
 	if err != nil {
-		h.logger.Error("upstream error", "server", serverName, "method", msg.Method, "err", err)
-		h.writeError(w, msg.ID, CodeInternalError, "upstream error")
+		if strings.Contains(err.Error(), "circuit open") {
+			cb := h.circuitBreakerFor(serverName)
+			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", cb.RecoveryRemaining().Seconds()))
+			h.writeError(w, msg.ID, CodeInternalError, fmt.Sprintf("server %q circuit open", serverName))
+		} else {
+			h.logger.Error("upstream error", "server", serverName, "method", msg.Method, "err", err)
+			h.writeError(w, msg.ID, CodeInternalError, "upstream error")
+		}
 		return
 	}
 
@@ -141,7 +166,9 @@ func (h *Handler) HandleSSEMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := tr.Send(r.Context(), body)
+	resp, err := h.callWithCircuitBreaker(serverName, func() ([]byte, error) {
+		return tr.Send(r.Context(), body)
+	})
 	if err != nil {
 		h.writeError(w, msg.ID, CodeInternalError, "upstream error")
 		return
@@ -188,8 +215,11 @@ func (h *Handler) buildTransport(srv *store.MCPServer) (transport.Transport, err
 	})
 
 	switch srv.Transport {
-	case "streamable_http":
+	case "streamable_http", "http": // "http" is a common alias for streamable_http
 		endpoint, _ := srv.Config["endpoint"].(string)
+		if endpoint == "" {
+			endpoint, _ = srv.Config["url"].(string) // "url" is a common alias for "endpoint"
+		}
 		if endpoint == "" {
 			return nil, fmt.Errorf("streamable_http transport requires config.endpoint")
 		}
@@ -245,6 +275,68 @@ func (h *Handler) serverConfig(ctx context.Context, name string) (*store.MCPServ
 	h.cacheMu.Unlock()
 
 	return srv, nil
+}
+
+// circuitBreakerFor returns the CircuitBreaker for serverName, creating one lazily.
+func (h *Handler) circuitBreakerFor(serverName string) *circuitbreaker.CircuitBreaker {
+	cb := circuitbreaker.New(h.proxyCfg.CircuitBreaker)
+	actual, _ := h.breakers.LoadOrStore(serverName, cb)
+	return actual.(*circuitbreaker.CircuitBreaker)
+}
+
+// callWithCircuitBreaker wraps an upstream call with circuit breaker protection.
+// Returns an error immediately when the circuit is open.
+func (h *Handler) callWithCircuitBreaker(serverName string, fn func() ([]byte, error)) ([]byte, error) {
+	cb := h.circuitBreakerFor(serverName)
+
+	if !cb.Allow() {
+		if h.pm != nil {
+			h.pm.RecordCircuitState(serverName, float64(circuitbreaker.StateOpen))
+		}
+		return nil, fmt.Errorf("circuit open for server %q", serverName)
+	}
+
+	resp, err := fn()
+	if err != nil {
+		cb.RecordFailure()
+		if h.pm != nil {
+			h.pm.RecordUpstreamError(serverName, classifyError(err))
+		}
+	} else {
+		cb.RecordSuccess()
+	}
+	if h.pm != nil {
+		h.pm.RecordCircuitState(serverName, float64(cb.State()))
+	}
+	return resp, err
+}
+
+// classifyError maps a transport error to a short label for metrics.
+func classifyError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case containsAny(msg, "timeout", "deadline"):
+		return "timeout"
+	case containsAny(msg, "connection refused", "refused"):
+		return "connection_refused"
+	case containsAny(msg, "no such host", "dns"):
+		return "dns_error"
+	default:
+		return "upstream_error"
+	}
+}
+
+func containsAny(s string, subs ...string) bool {
+	sl := strings.ToLower(s)
+	for _, sub := range subs {
+		if strings.Contains(sl, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) readBody(r *http.Request) ([]byte, error) {

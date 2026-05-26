@@ -27,33 +27,41 @@ import (
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
 	"github.com/K3y5tr0ke/mcpgate/internal/logging"
 	logSinks "github.com/K3y5tr0ke/mcpgate/internal/logging/sinks"
+	"github.com/K3y5tr0ke/mcpgate/internal/metrics"
 	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
+	"github.com/K3y5tr0ke/mcpgate/internal/ratelimit"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 	pgstore "github.com/K3y5tr0ke/mcpgate/internal/store/postgres"
 	redisstore "github.com/K3y5tr0ke/mcpgate/internal/store/redis"
+	"github.com/K3y5tr0ke/mcpgate/internal/tracing"
 )
 
 // Server is the main HTTP server wrapping the chi router and all dependencies.
 type Server struct {
-	cfg            *config.Config
-	logger         *slog.Logger
-	db             *pgxpool.Pool
-	redis          *redis.Client
-	proxyHandler   *proxy.Handler
-	adminRouter    *api.Router
-	samlHandlers   *samlpkg.Handlers
-	jwtManager     *jwtpkg.Manager
-	sessionCache   *redisstore.SessionCache
-	sessionStore   store.SessionStore
-	enforcer       *rbac.Enforcer
-	jwksValidator  *jwkspkg.Validator
-	auditStore     *pgstore.AuditLogStore
-	pipeline       *logging.Pipeline
-	walSink        *logSinks.WALSink // nil if WALPath == ""
-	serverStore    store.ServerStore
-	authMiddleware func(http.Handler) http.Handler
-	http           *http.Server
-	bgCancel       context.CancelFunc // stops background goroutines (eviction, cleanup, WAL)
+	cfg              *config.Config
+	logger           *slog.Logger
+	db               *pgxpool.Pool
+	redis            *redis.Client
+	proxyHandler     *proxy.Handler
+	adminRouter      *api.Router
+	samlHandlers     *samlpkg.Handlers
+	jwtManager       *jwtpkg.Manager
+	sessionCache     *redisstore.SessionCache
+	sessionStore     store.SessionStore
+	enforcer         *rbac.Enforcer
+	jwksValidator    *jwkspkg.Validator
+	auditStore       *pgstore.AuditLogStore
+	pipeline         *logging.Pipeline
+	walSink          *logSinks.WALSink // nil if WALPath == ""
+	serverStore      store.ServerStore
+	authMiddleware   func(http.Handler) http.Handler
+	metricsCollector *metrics.Collector
+	tracingProvider  *tracing.Provider
+	rateLimiter      store.RateLimiter
+	metricsServer    *http.Server
+	metricsAddr      string // actual listen address, e.g. "127.0.0.1:9090"
+	http             *http.Server
+	bgCancel         context.CancelFunc // stops background goroutines (eviction, cleanup, WAL, retention)
 }
 
 // New builds a Server and wires the router.
@@ -109,6 +117,25 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 		return nil, fmt.Errorf("seed rbac policies: %w", err)
 	}
 
+	// Metrics collector (dedicated registry — safe for concurrent test instances).
+	collector := metrics.NewCollector()
+
+	// Tracing provider (no-op when OTLP is disabled).
+	tracingProvider, err := tracing.New(cfg.Metrics.OTLP, "mcpgate")
+	if err != nil {
+		return nil, fmt.Errorf("init tracing: %w", err)
+	}
+
+	// Per-user rate limiter (only when enabled).
+	var rateLimiter store.RateLimiter
+	if cfg.RateLimiting.Enabled {
+		rl, err := redisstore.NewRateLimiter(redisClient)
+		if err != nil {
+			return nil, fmt.Errorf("init rate limiter: %w", err)
+		}
+		rateLimiter = rl
+	}
+
 	// Initialise audit log pipeline.
 	initHash, err := auditStore.LatestHashChain(context.Background())
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -134,6 +161,40 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 	// Start the pipeline with context.Background() so the final Drain() flush
 	// succeeds even after the server's lifecycle context is cancelled.
 	pipeline.Start(context.Background())
+
+	// Wire pipeline dropped-count into the metrics gauge.
+	collector.RegisterPipelineGauge(pipeline.DroppedCount)
+
+	// Metrics HTTP server on the dedicated port (separate from the main API).
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", collector.Handler())
+	metricsMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	metricsServer := &http.Server{
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	// Create the listener synchronously so MetricsAddr() is available immediately.
+	metricsLn, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.MetricsPort))
+	if err != nil {
+		return nil, fmt.Errorf("metrics server listen: %w", err)
+	}
+	go func() {
+		if err := metricsServer.Serve(metricsLn); err != nil && err != http.ErrServerClosed {
+			logger.Error("metrics server error", "err", err)
+		}
+	}()
+
+	// WAL crash recovery: if a .replaying file was left by a previous crash,
+	// rename it back so the replay goroutine picks it up normally.
+	if cfg.Logging.Pipeline.WALPath != "" {
+		replayingPath := cfg.Logging.Pipeline.WALPath + ".replaying"
+		if _, err := os.Stat(replayingPath); err == nil {
+			_ = os.Rename(replayingPath, cfg.Logging.Pipeline.WALPath)
+			logger.Warn("wal: .replaying file found on startup; crash recovery rename done")
+		}
+	}
 
 	// Background goroutines use a cancellable context stopped in Shutdown/Run.
 	bgCtx, bgCancel := context.WithCancel(context.Background())
@@ -175,28 +236,57 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 		}()
 	}
 
+	// Audit log retention: delete entries older than HotDays once per day.
+	if cfg.Logging.Retention.HotDays > 0 {
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					n, err := auditStore.DeleteExpired(bgCtx, cfg.Logging.Retention.HotDays)
+					if err != nil {
+						logger.Warn("audit log retention cleanup failed", "err", err)
+					} else if n > 0 {
+						logger.Info("audit log retention cleanup", "deleted", n, "hot_days", cfg.Logging.Retention.HotDays)
+					}
+				case <-bgCtx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	proxyHandler := proxy.NewHandler(cfg.Proxy, serverStore, logger)
+	proxyHandler.WithMetrics(collector)
+
 	s := &Server{
 		cfg:          cfg,
 		logger:       logger,
 		db:           db,
 		redis:        redisClient,
-		proxyHandler: proxy.NewHandler(cfg.Proxy, serverStore, logger),
+		proxyHandler: proxyHandler,
 		adminRouter: api.NewRouter(
 			serverStore, samlIDPStore, jwksStore, roleStore, userStore,
 			auditStore, pipeline, enforcer, logger,
 		),
-		samlHandlers:   samlHandlers,
-		jwtManager:     jwtManager,
-		sessionCache:   sessionCache,
-		sessionStore:   sessionStore,
-		enforcer:       enforcer,
-		jwksValidator:  jwksValidator,
-		auditStore:     auditStore,
-		pipeline:       pipeline,
-		walSink:        walSink,
-		serverStore:    serverStore,
-		authMiddleware: authMiddleware,
-		bgCancel:       bgCancel,
+		samlHandlers:     samlHandlers,
+		jwtManager:       jwtManager,
+		sessionCache:     sessionCache,
+		sessionStore:     sessionStore,
+		enforcer:         enforcer,
+		jwksValidator:    jwksValidator,
+		auditStore:       auditStore,
+		pipeline:         pipeline,
+		walSink:          walSink,
+		serverStore:      serverStore,
+		authMiddleware:   authMiddleware,
+		metricsCollector: collector,
+		tracingProvider:  tracingProvider,
+		rateLimiter:      rateLimiter,
+		metricsServer:    metricsServer,
+		metricsAddr:      metricsLn.Addr().String(),
+		bgCancel:         bgCancel,
 	}
 
 	s.http = &http.Server{
@@ -216,11 +306,14 @@ func (s *Server) buildRouter() http.Handler {
 
 	r.Use(chimw.RequestID)
 	r.Use(chimw.Recoverer)
+	r.Use(s.tracingProvider.Middleware())
 	r.Use(s.requestLogger)
 
 	// Auth-exempt system endpoints.
 	r.Get("/health", s.handleHealth)
+	r.Get("/healthz", s.handleHealth) // Kubernetes liveness probe alias
 	r.Get("/ready", s.handleReady)
+	r.Get("/readyz", s.handleReady) // Kubernetes readiness probe alias
 
 	// SAML auth routes — no auth middleware (these ARE the login flow).
 	r.Route("/auth/saml", func(r chi.Router) {
@@ -244,10 +337,12 @@ func (s *Server) buildRouter() http.Handler {
 		})
 	})
 
-	// MCP proxy routes — auth, RBAC enforcement, then audit logging.
+	// MCP proxy routes — auth → log (pre-parse body) → metrics → rate limit → RBAC → handler.
 	r.Route("/mcp/{serverName}", func(r chi.Router) {
 		r.Use(s.authMiddleware)
 		r.Use(logging.Middleware(s.pipeline, s.serverStore))
+		r.Use(s.metricsCollector.Middleware())
+		r.Use(ratelimit.Middleware(s.rateLimiter, s.cfg.RateLimiting, s.metricsCollector, s.logger))
 		r.Use(rbac.Authorize(s.enforcer, s.logger))
 		r.Post("/message", s.proxyHandler.HandleStreamableHTTP)
 		r.Get("/sse", s.proxyHandler.HandleSSEStream)
@@ -289,27 +384,66 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 
+	type componentStatus struct {
+		Status    string `json:"status"`
+		LatencyMS *int64 `json:"latency_ms,omitempty"`
+		Detail    string `json:"detail,omitempty"`
+	}
+
+	overall := "ok"
+	components := map[string]componentStatus{}
+
+	// Database — critical component.
+	t0 := time.Now()
 	if err := s.db.Ping(ctx); err != nil {
 		s.logger.Error("readiness: database unavailable", "error", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"status": "error", "detail": "database unavailable",
-		})
-		return
+		overall = "error"
+		components["database"] = componentStatus{Status: "error", Detail: err.Error()}
+	} else {
+		ms := time.Since(t0).Milliseconds()
+		components["database"] = componentStatus{Status: "ok", LatencyMS: &ms}
 	}
 
+	// Redis — critical component.
+	t0 = time.Now()
 	if err := s.redis.Ping(ctx).Err(); err != nil {
 		s.logger.Error("readiness: redis unavailable", "error", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"status": "error", "detail": "redis unavailable",
-		})
-		return
+		if overall == "ok" {
+			overall = "error"
+		}
+		components["redis"] = componentStatus{Status: "error", Detail: err.Error()}
+	} else {
+		ms := time.Since(t0).Milliseconds()
+		components["redis"] = componentStatus{Status: "ok", LatencyMS: &ms}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	// Audit pipeline — non-critical (degraded, not error).
+	dropped := s.pipeline.DroppedCount()
+	pipelineStatus := "ok"
+	if dropped > 0 {
+		if overall == "ok" {
+			overall = "degraded"
+		}
+		pipelineStatus = "degraded"
+	}
+	components["pipeline"] = componentStatus{Status: pipelineStatus, Detail: fmt.Sprintf("dropped_total=%d", dropped)}
+
+	status := http.StatusOK
+	if overall == "error" {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, map[string]any{
+		"status":     overall,
+		"components": components,
+	})
 }
 
 // Handler returns the HTTP handler. Used by integration tests.
 func (s *Server) Handler() http.Handler { return s.http.Handler }
+
+// MetricsAddr returns the actual listen address of the Prometheus metrics server,
+// e.g. "127.0.0.1:9090". Used by integration tests to scrape metrics.
+func (s *Server) MetricsAddr() string { return s.metricsAddr }
 
 // JWTManager returns the JWT manager. Used by integration tests.
 func (s *Server) JWTManager() *jwtpkg.Manager { return s.jwtManager }
@@ -320,6 +454,17 @@ func (s *Server) Enforcer() *rbac.Enforcer { return s.enforcer }
 // Shutdown stops background goroutines and drains the audit log pipeline.
 // Called automatically by Run() on signal; also safe to call from tests.
 func (s *Server) Shutdown() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Stop metrics scrapes and flush pending OTLP spans before goroutines exit.
+	if s.metricsServer != nil {
+		_ = s.metricsServer.Shutdown(ctx)
+	}
+	if s.tracingProvider != nil {
+		_ = s.tracingProvider.Shutdown(ctx)
+	}
+
 	s.bgCancel()
 	s.pipeline.Drain()
 }

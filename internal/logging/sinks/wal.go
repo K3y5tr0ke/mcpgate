@@ -52,17 +52,34 @@ func (s *WALSink) Write(_ context.Context, entries []store.AuditLogEntry) error 
 }
 
 // Replay reads all entries from the WAL, passes them to primary, and on success
-// truncates the file. Safe to call concurrently — acquires the write mutex.
+// removes the replay file. Uses an atomic rename to prevent double-insert on crash:
+//
+//  1. Rename path → path+".replaying" (atomic on POSIX). If this succeeds, the
+//     original file is gone — new writes go to a fresh file while we read.
+//  2. Read all entries from the ".replaying" file.
+//  3. Write to primary.
+//  4. On success: remove ".replaying".
+//  5. On failure: rename ".replaying" back to path so the next attempt retries.
+//
+// Safe to call concurrently — acquires the write mutex.
 func (s *WALSink) Replay(ctx context.Context, primary Sink) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	f, err := os.Open(s.path)
-	if os.IsNotExist(err) {
-		return nil // nothing to replay
+	replayingPath := s.path + ".replaying"
+
+	if err := os.Rename(s.path, replayingPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil // nothing to replay
+		}
+		return fmt.Errorf("wal: rename for replay: %w", err)
 	}
+
+	f, err := os.Open(replayingPath) //nolint:gosec // replayingPath is derived from the configured WALPath, not user input
 	if err != nil {
-		return fmt.Errorf("wal: open for replay: %w", err)
+		// Restore so we don't silently lose the file on the next attempt.
+		_ = os.Rename(replayingPath, s.path)
+		return fmt.Errorf("wal: open .replaying: %w", err)
 	}
 
 	var entries []store.AuditLogEntry
@@ -82,19 +99,25 @@ func (s *WALSink) Replay(ctx context.Context, primary Sink) error {
 	f.Close() //nolint:errcheck,gosec
 
 	if err := scanner.Err(); err != nil {
+		_ = os.Rename(replayingPath, s.path)
 		return fmt.Errorf("wal: scan: %w", err)
 	}
 	if len(entries) == 0 {
+		_ = os.Remove(replayingPath) //nolint:errcheck
 		return nil
 	}
 
 	if err := primary.Write(ctx, entries); err != nil {
+		// Restore for next attempt.
+		_ = os.Rename(replayingPath, s.path)
 		return fmt.Errorf("wal: replay to primary: %w", err)
 	}
 
-	// Truncate on success — entries are now in the primary store.
-	if err := os.Truncate(s.path, 0); err != nil {
-		s.logger.Warn("wal: truncate after replay failed", "err", err)
+	// Only delete after confirmed write — crash here still causes a retry on
+	// next startup but the unique hash_chain index will prevent duplicates
+	// once migration 004 is deployed.
+	if err := os.Remove(replayingPath); err != nil {
+		s.logger.Warn("wal: remove .replaying after replay failed", "err", err)
 	}
 	s.logger.Info("wal: replayed entries to primary", "count", len(entries))
 	return nil

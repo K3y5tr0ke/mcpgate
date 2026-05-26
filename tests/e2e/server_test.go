@@ -78,6 +78,49 @@ func newTestServer(t *testing.T) *testServer {
 	}
 }
 
+// newTestServerWith is like newTestServer but applies modify to the config
+// before constructing the server. Use this when a test needs a non-default
+// config (e.g. rate limiting enabled with a low RPM, or a reduced circuit
+// breaker failure threshold).
+func newTestServerWith(t *testing.T, modify func(*config.Config)) *testServer {
+	t.Helper()
+
+	db := testutil.NewPostgresPool(t, pgstore.Migrations)
+	redisClient := testutil.NewRedisClient(t)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	httpSrv := httptest.NewUnstartedServer(http.NotFoundHandler())
+	httpSrv.Start()
+	t.Cleanup(httpSrv.Close)
+
+	baseURL := httpSrv.URL
+
+	cfg := buildTestConfig(baseURL)
+	modify(cfg)
+
+	srv, err := server.New(cfg, logger, db, redisClient)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	httpSrv.Config.Handler = srv.Handler()
+	t.Cleanup(srv.Shutdown)
+
+	return &testServer{
+		t:            t,
+		url:          baseURL,
+		userStore:    pgstore.NewUserStore(db),
+		sessionStore: pgstore.NewSessionStore(db),
+		sessionCache: redisstore.NewSessionCache(redisClient),
+		jwksStore:    pgstore.NewJWKSConfigStore(db),
+		idpStore:     pgstore.NewSAMLIDPConfigStore(db),
+		roleStore:    pgstore.NewRoleStore(db),
+		auditStore:   pgstore.NewAuditLogStore(db),
+		srv:          srv,
+	}
+}
+
 func buildTestConfig(baseURL string) *config.Config {
 	return &config.Config{
 		Server: config.ServerConfig{

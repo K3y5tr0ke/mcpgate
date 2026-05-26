@@ -119,6 +119,7 @@ func (rt *Router) Handler() http.Handler {
 	r.Get("/logs", lh.list)
 	r.Get("/logs/export", lh.export)
 	r.Get("/logs/stream", lh.stream)
+	r.Get("/logs/verify", lh.verify)
 	r.Get("/metrics", notImplemented)
 
 	return r

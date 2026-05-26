@@ -121,7 +121,7 @@ func (s *AuditLogStore) Query(
 
 	n := len(args)
 	query := fmt.Sprintf(`
-		SELECT id, timestamp, trace_id, session_id, user_id, user_email, client_ip::text,
+		SELECT id, timestamp, trace_id, session_id, user_id, user_email, host(client_ip),
 		       server_id, server_name, mcp_method, tool_name, direction, status,
 		       error_code, error_message, latency_ms, request_size, response_size,
 		       rbac_decision, metadata, hash_chain,
@@ -162,7 +162,7 @@ func (s *AuditLogStore) Export(
 ) error {
 	where, args := buildAuditWhere(filter)
 	query := fmt.Sprintf(`
-		SELECT id, timestamp, trace_id, session_id, user_id, user_email, client_ip::text,
+		SELECT id, timestamp, trace_id, session_id, user_id, user_email, host(client_ip),
 		       server_id, server_name, mcp_method, tool_name, direction, status,
 		       error_code, error_message, latency_ms, request_size, response_size,
 		       rbac_decision, metadata, hash_chain, 0::bigint
@@ -208,7 +208,7 @@ func (s *AuditLogStore) Export(
 // genesisHash is used as the chain seed when no entries exist before from.
 func (s *AuditLogStore) VerifyHashChain(ctx context.Context, from, to time.Time, genesisHash string) (bool, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, timestamp, trace_id, session_id, user_id, user_email, client_ip::text,
+		SELECT id, timestamp, trace_id, session_id, user_id, user_email, host(client_ip),
 		       server_id, server_name, mcp_method, tool_name, direction, status,
 		       error_code, error_message, latency_ms, request_size, response_size,
 		       rbac_decision, metadata, hash_chain, 0::bigint
@@ -274,6 +274,22 @@ func auditVerifyChain(entries []store.AuditLogEntry, prevHash string) (bool, err
 		prev = computed
 	}
 	return true, nil
+}
+
+// DeleteExpired deletes audit log entries older than hotDays days and returns
+// the number of rows removed. A hotDays value of 0 is a no-op.
+func (s *AuditLogStore) DeleteExpired(ctx context.Context, hotDays int) (int64, error) {
+	if hotDays <= 0 {
+		return 0, nil
+	}
+	tag, err := s.db.Exec(ctx,
+		`DELETE FROM audit_logs WHERE timestamp < now() - ($1 || ' days')::interval`,
+		hotDays,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("audit_logs: delete expired: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func buildAuditWhere(f store.LogFilter) (string, []any) {
@@ -353,8 +369,7 @@ func scanAuditEntry(row auditRowScanner) (store.AuditLogEntry, int64, error) {
 		e.ServerID = uuid.UUID(*serverID)
 	}
 	if clientIP != nil {
-		// INET ::text includes the prefix length (e.g. "127.0.0.1/32"); strip it.
-		e.ClientIP = strings.SplitN(*clientIP, "/", 2)[0]
+		e.ClientIP = *clientIP
 	}
 	// pgx decodes timestamptz with the local timezone; normalise to UTC so the
 	// hash recomputed here matches what the pipeline computed before INSERT.
