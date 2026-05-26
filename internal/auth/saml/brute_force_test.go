@@ -36,10 +36,10 @@ func (m *mockCounter) Del(_ context.Context, keys ...string) (int64, error) {
 	return int64(len(keys)), nil
 }
 
-func newGuard(rc redisCounter, max int, enabled bool) *BruteForceGuard {
+func newGuard(rc redisCounter, maxAttempts int, enabled bool) *BruteForceGuard {
 	return &BruteForceGuard{
 		redis:       rc,
-		maxAttempts: int64(max),
+		maxAttempts: int64(maxAttempts),
 		window:      time.Minute,
 		blockFor:    time.Hour,
 		enabled:     enabled,
@@ -126,8 +126,9 @@ func TestNewBruteForceGuard_FromConfig(t *testing.T) {
 		Window:      15 * time.Minute,
 		BlockFor:    time.Hour,
 	}
+	rc := newMockCounter()
 	g := &BruteForceGuard{
-		redis:       newMockCounter(),
+		redis:       rc,
 		maxAttempts: int64(cfg.MaxAttempts),
 		window:      cfg.Window,
 		blockFor:    cfg.BlockFor,
@@ -135,5 +136,17 @@ func TestNewBruteForceGuard_FromConfig(t *testing.T) {
 	}
 	if g.maxAttempts != 5 {
 		t.Errorf("maxAttempts: got %d, want 5", g.maxAttempts)
+	}
+	if g.window != 15*time.Minute {
+		t.Errorf("window: got %v, want 15m", g.window)
+	}
+	if g.blockFor != time.Hour {
+		t.Errorf("blockFor: got %v, want 1h", g.blockFor)
+	}
+	if !g.enabled {
+		t.Error("enabled: got false, want true")
+	}
+	if g.redis != rc {
+		t.Error("redis: field not set")
 	}
 }

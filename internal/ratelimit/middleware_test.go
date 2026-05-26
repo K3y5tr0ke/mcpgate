@@ -55,7 +55,7 @@ func TestMiddleware_Disabled_PassesThrough(t *testing.T) {
 		called = true
 		w.WriteHeader(http.StatusOK)
 	}))
-	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", nil))
+	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", http.NoBody))
 	handler.ServeHTTP(httptest.NewRecorder(), r)
 	if !called {
 		t.Error("inner handler should be called when middleware is disabled")
@@ -70,7 +70,7 @@ func TestMiddleware_Allow_CallsNext(t *testing.T) {
 		called = true
 		w.WriteHeader(http.StatusOK)
 	}))
-	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", nil))
+	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", http.NoBody))
 	handler.ServeHTTP(httptest.NewRecorder(), r)
 	if !called {
 		t.Error("inner handler should be called when request is allowed")
@@ -87,7 +87,7 @@ func TestMiddleware_Denied_Returns429(t *testing.T) {
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		called = true
 	}))
-	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", nil))
+	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", http.NoBody))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
 
@@ -107,7 +107,7 @@ func TestMiddleware_Denied_JSONRPCErrorBody(t *testing.T) {
 	mw := ratelimit.Middleware(lim, enabledCfg(1), nil, slog.Default())
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 
-	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", nil))
+	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", http.NoBody))
 	r = r.WithContext(proxy.WithMessage(r.Context(), &proxy.Message{Method: "tools/list"}))
 
 	w := httptest.NewRecorder()
@@ -138,7 +138,7 @@ func TestMiddleware_LimiterError_FailOpen(t *testing.T) {
 		called = true
 		w.WriteHeader(http.StatusOK)
 	}))
-	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", nil))
+	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", http.NoBody))
 	handler.ServeHTTP(httptest.NewRecorder(), r)
 	if !called {
 		t.Error("should fail open when limiter returns an error")
@@ -151,11 +151,11 @@ func TestMiddleware_Denied_IncreasesMetric(t *testing.T) {
 	mw := ratelimit.Middleware(lim, enabledCfg(1), col, slog.Default())
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 
-	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", nil))
+	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", http.NoBody))
 	handler.ServeHTTP(httptest.NewRecorder(), r)
 	handler.ServeHTTP(httptest.NewRecorder(), r)
 
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody)
 	w := httptest.NewRecorder()
 	col.Handler().ServeHTTP(w, req)
 	body, _ := io.ReadAll(w.Body)
@@ -165,7 +165,7 @@ func TestMiddleware_Denied_IncreasesMetric(t *testing.T) {
 }
 
 func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && findSubstring(s, sub))
+	return len(s) >= len(sub) && (s == sub || s != "" && findSubstring(s, sub))
 }
 
 func findSubstring(s, sub string) bool {

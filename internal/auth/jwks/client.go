@@ -77,7 +77,7 @@ func (c *Client) cacheValid() bool {
 // fetch unconditionally GETs the JWKS URL and replaces the key cache.
 // Must be called with the write lock held.
 func (c *Client) fetch(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, http.NoBody)
 	if err != nil {
 		return err
 	}

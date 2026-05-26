@@ -61,7 +61,7 @@ func (t *SSE) Send(ctx context.Context, message []byte) ([]byte, error) {
 }
 
 func (t *SSE) Stream(ctx context.Context, message []byte, messages chan<- []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.sseEndpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.sseEndpoint, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("sse: open stream: %w", err)
 	}

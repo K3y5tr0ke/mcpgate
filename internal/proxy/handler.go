@@ -181,7 +181,8 @@ func (h *Handler) HandleSSEMessage(w http.ResponseWriter, r *http.Request) {
 // transportFor returns a cached Transport for serverName, creating one if needed.
 func (h *Handler) transportFor(ctx context.Context, serverName string) (transport.Transport, error) {
 	if v, ok := h.transports.Load(serverName); ok {
-		return v.(transport.Transport), nil
+		tr, _ := v.(transport.Transport)
+		return tr, nil
 	}
 
 	srv, err := h.serverConfig(ctx, serverName)
@@ -201,7 +202,8 @@ func (h *Handler) transportFor(ctx context.Context, serverName string) (transpor
 	actual, loaded := h.transports.LoadOrStore(serverName, tr)
 	if loaded {
 		_ = tr.Close()
-		return actual.(transport.Transport), nil
+		cached, _ := actual.(transport.Transport)
+		return cached, nil
 	}
 	return tr, nil
 }
@@ -282,7 +284,11 @@ func (h *Handler) serverConfig(ctx context.Context, name string) (*store.MCPServ
 func (h *Handler) ServerCircuitStates() map[string]string {
 	states := make(map[string]string)
 	h.breakers.Range(func(k, v any) bool {
-		states[k.(string)] = v.(*circuitbreaker.CircuitBreaker).State().String()
+		key, _ := k.(string)
+		cb, _ := v.(*circuitbreaker.CircuitBreaker)
+		if key != "" && cb != nil {
+			states[key] = cb.State().String()
+		}
 		return true
 	})
 	return states
@@ -298,7 +304,8 @@ func (h *Handler) BuildTransport(srv *store.MCPServer) (transport.Transport, err
 func (h *Handler) circuitBreakerFor(serverName string) *circuitbreaker.CircuitBreaker {
 	cb := circuitbreaker.New(h.proxyCfg.CircuitBreaker)
 	actual, _ := h.breakers.LoadOrStore(serverName, cb)
-	return actual.(*circuitbreaker.CircuitBreaker)
+	result, _ := actual.(*circuitbreaker.CircuitBreaker)
+	return result
 }
 
 // callWithCircuitBreaker wraps an upstream call with circuit breaker protection.

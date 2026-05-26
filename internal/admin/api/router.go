@@ -147,10 +147,6 @@ func (rt *Router) Handler() http.Handler {
 	return r
 }
 
-func notImplemented(w http.ResponseWriter, _ *http.Request) {
-	writeJSONError(w, http.StatusNotImplemented, "not yet implemented")
-}
-
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

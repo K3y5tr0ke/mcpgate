@@ -82,9 +82,9 @@ func buildSAMLResponse(t *testing.T, idp *cssaml.IdentityProvider, sp *cssaml.Se
 		IDP:         idp,
 		HTTPRequest: httptest.NewRequest(http.MethodPost, "/sso", nil),
 		Now:         time.Now(),
-		Request: cssaml.AuthnRequest{
-			ID: "_test-authn-" + uuid.New().String(),
-		},
+		// Empty request ID → IdP-initiated flow: no InResponseTo in assertion.
+		// The SP has AllowIDPInitiated: true, so ParseResponse accepts it.
+		Request:                 cssaml.AuthnRequest{},
 		ServiceProviderMetadata: spMeta,
 		SPSSODescriptor:         &spMeta.SPSSODescriptors[0],
 		ACSEndpoint:             acsEndpoint,
@@ -151,7 +151,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		EntityID:     "https://idp.example.com",
 		SSOURL:       "https://idp.example.com/sso",
 		Certificate:  certPEM(idpCert),
-		AttributeMap: map[string]string{"email": "email", "displayName": "display_name"},
+		AttributeMap: map[string]string{"mail": "email", "cn": "display_name"},
 		GroupRoleMap: map[string]string{},
 		IsEnabled:    true,
 	}
@@ -236,12 +236,25 @@ func (e *testEnv) buildTestIDP(t *testing.T, acsURL string) *cssaml.IdentityProv
 func (e *testEnv) buildHandlers(t *testing.T, acsURL string) (*saml.Handlers, *cssaml.IdentityProvider) {
 	t.Helper()
 
-	sp, err := saml.NewSP(e.spCfg, e.idpStore, nopLogger())
+	// Override ACSURL with the live test-server URL so that ParseResponse can
+	// validate the Recipient attribute in the assertion against sp.AcsURL.
+	cfg := e.spCfg
+	cfg.ACSURL = acsURL
+
+	// Build the test IdP first so we can sync its EntityID into the stored config.
+	// samlidp.New sets EntityID = MetadataURL = URL + "/metadata", not URL itself.
+	idp := e.buildTestIDP(t, acsURL)
+
+	// Sync stored IdP EntityID with what the test IdP actually advertises.
+	e.idpCfg.EntityID = idp.Metadata().EntityID
+	if err := e.idpStore.Update(context.Background(), e.idpCfg); err != nil {
+		t.Fatalf("update IdP config EntityID: %v", err)
+	}
+
+	sp, err := saml.NewSP(cfg, e.idpStore, nopLogger())
 	if err != nil {
 		t.Fatalf("new SP: %v", err)
 	}
-
-	idp := e.buildTestIDP(t, acsURL)
 
 	handlers := saml.NewHandlers(
 		sp,
@@ -252,7 +265,7 @@ func (e *testEnv) buildHandlers(t *testing.T, acsURL string) (*saml.Handlers, *c
 		e.idpStore,
 		e.jwtManager,
 		e.redisClient,
-		e.spCfg,
+		cfg,
 		config.AuthConfig{SessionTTL: time.Hour},
 		nopLogger(),
 	)

@@ -181,7 +181,7 @@ func (t *Stdio) readLoop(r io.Reader) {
 		}
 		idKey := string(parsed.ID)
 		if v, ok := t.pending.Load(idKey); ok {
-			ch := v.(chan []byte)
+			ch, _ := v.(chan []byte)
 			buf := make([]byte, len(line))
 			copy(buf, line)
 			select {

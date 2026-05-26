@@ -207,4 +207,3 @@ func (h *serverHandler) test(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "tools": tools})
 }
-

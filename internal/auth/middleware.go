@@ -8,10 +8,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	jwtpkg "github.com/K3y5tr0ke/mcpgate/internal/auth/jwt"
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
-	"github.com/google/uuid"
 )
 
 // TokenValidator is the interface Authenticate() requires for mcpgate session JWTs.

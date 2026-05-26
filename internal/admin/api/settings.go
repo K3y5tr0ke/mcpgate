@@ -14,7 +14,7 @@ var allowedSettingsKeys = map[string]bool{
 	"session_ttl_seconds":               true,
 	"rate_limit_default_rpm":            true,
 	"rate_limit_default_rpd":            true,
-	"log_retention_hot_days":            true,
+	"audit_log_retention_days":          true,
 	"proxy_default_timeout_seconds":     true,
 	"circuit_breaker_failure_threshold": true,
 	"circuit_breaker_recovery_seconds":  true,

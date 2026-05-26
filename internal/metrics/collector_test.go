@@ -24,7 +24,7 @@ func withMessage(r *http.Request, method string) *http.Request {
 }
 
 func chiRequest(serverName, path string) *http.Request {
-	r := httptest.NewRequest(http.MethodPost, path, nil)
+	r := httptest.NewRequest(http.MethodPost, path, http.NoBody)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("serverName", serverName)
 	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
@@ -141,7 +141,7 @@ func TestCollector_AuthFailures_Counter(t *testing.T) {
 // scrape calls c.Handler() and returns the Prometheus text output.
 func scrape(t *testing.T, c *metrics.Collector) string {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody)
 	w := httptest.NewRecorder()
 	c.Handler().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -152,4 +152,4 @@ func scrape(t *testing.T, c *metrics.Collector) string {
 }
 
 // Ensure RateLimiter interface is satisfied (compile-time check).
-var _ store.RateLimiter = (store.RateLimiter)(nil)
+var _ store.RateLimiter = store.RateLimiter(nil)

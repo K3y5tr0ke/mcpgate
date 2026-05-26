@@ -72,11 +72,11 @@ func (cb *CircuitBreaker) Allow() bool {
 		return true
 
 	case StateHalfOpen:
-		max := cb.cfg.HalfOpenMaxRequests
-		if max <= 0 {
-			max = 1
+		maxReqs := cb.cfg.HalfOpenMaxRequests
+		if maxReqs <= 0 {
+			maxReqs = 1
 		}
-		return cb.halfOpenCount.Load() < int32(max)
+		return cb.halfOpenCount.Load() < int32(maxReqs)
 
 	default:
 		return true
@@ -87,12 +87,12 @@ func (cb *CircuitBreaker) Allow() bool {
 func (cb *CircuitBreaker) RecordSuccess() {
 	switch State(cb.state.Load()) {
 	case StateHalfOpen:
-		max := cb.cfg.HalfOpenMaxRequests
-		if max <= 0 {
-			max = 1
+		maxReqs := cb.cfg.HalfOpenMaxRequests
+		if maxReqs <= 0 {
+			maxReqs = 1
 		}
 		n := cb.halfOpenCount.Add(1)
-		if n >= int32(max) {
+		if n >= int32(maxReqs) {
 			// All probes succeeded — close the circuit.
 			if cb.state.CompareAndSwap(int32(StateHalfOpen), int32(StateClosed)) {
 				cb.failures.Store(0)

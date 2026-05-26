@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
 )
@@ -72,7 +72,7 @@ func (h *metricsHandler) summary(w http.ResponseWriter, r *http.Request) {
 		ErrorRatePercent:  errorRatePercent(mfs, "mcpgate_requests_total"),
 		ActiveSessions:    activeSessions,
 		CircuitBreakers:   cbs,
-		DroppedAuditLogs:  int64(sumGauge(mfs, "mcpgate_audit_pipeline_dropped_total")),
+		DroppedAuditLogs:  sumGauge(mfs, "mcpgate_audit_pipeline_dropped_total"),
 	}
 
 	writeJSON(w, http.StatusOK, s)
@@ -133,7 +133,6 @@ func histogramP95MS(mfs []*dto.MetricFamily, name string) float64 {
 		target := float64(totalCount) * 0.95
 
 		// Aggregate bucket counts across all label combinations.
-		type bkt struct{ ub, count float64 }
 		bucketMap := map[float64]float64{}
 		for _, m := range mf.GetMetric() {
 			for _, b := range m.GetHistogram().GetBucket() {
@@ -184,4 +183,3 @@ func (h *metricsHandler) timeseries(w http.ResponseWriter, r *http.Request) {
 		"buckets": []bucket{{Requests: h.collector.RequestsLastMinute()}},
 	})
 }
-

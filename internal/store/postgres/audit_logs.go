@@ -92,7 +92,7 @@ func (s *AuditLogStore) BatchInsert(ctx context.Context, entries []store.AuditLo
 	}
 
 	sb.WriteString(`
-		ON CONFLICT (hash_chain) DO NOTHING`)
+		ON CONFLICT (hash_chain, timestamp) DO NOTHING`)
 
 	if _, err := s.db.Exec(ctx, sb.String(), args...); err != nil {
 		return fmt.Errorf("audit_logs: batch insert: %w", err)
@@ -287,7 +287,7 @@ func (s *AuditLogStore) DeleteExpired(ctx context.Context, hotDays int) (int64, 
 		return 0, nil
 	}
 	tag, err := s.db.Exec(ctx,
-		`DELETE FROM audit_logs WHERE timestamp < now() - ($1 || ' days')::interval`,
+		`DELETE FROM audit_logs WHERE timestamp < now() - make_interval(days => $1)`,
 		hotDays,
 	)
 	if err != nil {

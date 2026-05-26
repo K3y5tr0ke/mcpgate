@@ -15,7 +15,7 @@ INSERT INTO settings (key, value) VALUES
     ('session_ttl_seconds',               '3600'::jsonb),
     ('rate_limit_default_rpm',            '600'::jsonb),
     ('rate_limit_default_rpd',            '50000'::jsonb),
-    ('log_retention_hot_days',            '30'::jsonb),
+    ('audit_log_retention_days',          '30'::jsonb),
     ('proxy_default_timeout_seconds',     '10'::jsonb),
     ('circuit_breaker_failure_threshold', '5'::jsonb),
     ('circuit_breaker_recovery_seconds',  '30'::jsonb)

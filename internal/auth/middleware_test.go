@@ -91,7 +91,7 @@ func applyMiddleware(mw func(http.Handler) http.Handler, next http.Handler) http
 }
 
 func newRequest(token string) *http.Request {
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	if token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -229,7 +229,7 @@ func TestAuthenticate_CookieFallback(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	r.AddCookie(&http.Cookie{Name: "mcpgate_session", Value: "cookie.token.here"}) //nolint:gosec // G124: test cookie, secure attributes not needed
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, r)

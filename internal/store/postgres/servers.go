@@ -205,9 +205,9 @@ func scanServerRow(rows pgx.Rows) (*store.MCPServer, error) {
 }
 
 // wrapPgError translates pgx sentinel errors to store sentinels.
-func wrapPgError(err error, context string) error {
+func wrapPgError(err error, op string) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.ErrNotFound
 	}
-	return fmt.Errorf("%s: %w", context, err)
+	return fmt.Errorf("%s: %w", op, err)
 }

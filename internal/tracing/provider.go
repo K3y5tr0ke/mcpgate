@@ -66,7 +66,7 @@ func New(cfg config.OTLPConfig, serviceName string) (*Provider, error) {
 		return nil, fmt.Errorf("tracing: create resource: %w", err)
 	}
 
-	sampler := sdktrace.Sampler(sdktrace.AlwaysSample())
+	sampler := sdktrace.AlwaysSample()
 	if cfg.SampleRate > 0 && cfg.SampleRate < 1 {
 		sampler = sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRate))
 	}

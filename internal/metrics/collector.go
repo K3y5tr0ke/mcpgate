@@ -9,10 +9,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/K3y5tr0ke/mcpgate/internal/auth"
-	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/K3y5tr0ke/mcpgate/internal/auth"
+	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
 )
 
 // MinuteCounter tracks requests in the previous complete minute for dashboards.

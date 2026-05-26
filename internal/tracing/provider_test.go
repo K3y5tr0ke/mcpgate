@@ -46,7 +46,7 @@ func TestProvider_NoOp_MiddlewareDoesNotPanic(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/health", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -58,7 +58,7 @@ func TestProvider_NoOp_MiddlewareDoesNotPanic(t *testing.T) {
 func TestProvider_NoOp_SpanFromContextIsSafe(t *testing.T) {
 	p, _ := tracing.New(noopCfg(), "test-service")
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	w := httptest.NewRecorder()
 
 	var ctxInsideHandler context.Context
@@ -83,7 +83,7 @@ func TestProvider_NoOp_SpanFromContextIsSafe(t *testing.T) {
 func TestProvider_NoOp_PropagatesTraceContextHeader(t *testing.T) {
 	p, _ := tracing.New(noopCfg(), "test-service")
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	// Inject a synthetic traceparent to verify the propagator reads it.
 	req.Header.Set("Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 

@@ -14,39 +14,42 @@ linters:
     - unconvert
     - unparam
     - bodyclose
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment  # micro-opt hints, not defects
+        - shadow          # idiomatic Go (err re-use)
+
+    errcheck:
+      check-type-assertions: true
+
+    gosec:
+      excludes:
+        - G115  # integer overflow: acceptable in controlled internal math
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam
+        - rangeValCopy
+        - whyNoLint
+        - unnamedResult
+
+    exhaustive:
+      default-signifies-exhaustive: true
 
 formatters:
   enable:
     - gofmt
     - goimports
-
-formatters-settings:
-  goimports:
-    local-prefixes:
-      - github.com/K3y5tr0ke/mcpgate
-
-linters-settings:
-  govet:
-    enable-all: true
-
-  errcheck:
-    check-type-assertions: true
-
-  gosec:
-    excludes:
-      - G115  # integer overflow: acceptable in controlled internal math
-
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-    disabled-checks:
-      - hugeParam
-      - rangeValCopy
-
-  exhaustive:
-    default-signifies-exhaustive: true
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/K3y5tr0ke/mcpgate
 
 issues:
   exclude-rules:
@@ -56,6 +59,12 @@ issues:
         - gosec
         - errcheck
         - unparam
+    # Third-party Go code vendored inside npm packages (no go.mod, picked up by ./...)
+    - path: node_modules
+      linters:
+        - gocritic
+        - exhaustive
+        - govet
 
   max-issues-per-linter: 0
   max-same-issues: 0
@@ -63,3 +72,5 @@ issues:
 run:
   timeout: 5m
   go: "1.26"
+  exclude-dirs:
+    - node_modules

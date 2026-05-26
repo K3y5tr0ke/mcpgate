@@ -21,7 +21,7 @@ func (m *mockWriter) Status() int       { return m.status }
 func (m *mockWriter) BytesWritten() int { return m.bytes }
 
 func TestBuildEntry_WithIdentityAndMessage(t *testing.T) {
-	r := httptest.NewRequest(http.MethodPost, "/mcp/myserver/message", nil)
+	r := httptest.NewRequest(http.MethodPost, "/mcp/myserver/message", http.NoBody)
 	identity := auth.UserIdentity{
 		UserID:    uuid.New(),
 		Email:     "alice@example.com",
@@ -59,7 +59,7 @@ func TestBuildEntry_WithIdentityAndMessage(t *testing.T) {
 }
 
 func TestBuildEntry_NilMessage(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/mcp/myserver/sse", nil)
+	r := httptest.NewRequest(http.MethodGet, "/mcp/myserver/sse", http.NoBody)
 
 	ww := &mockWriter{status: 200, bytes: 0}
 	entry := BuildEntry(r, ww, uuid.Nil, time.Now())
@@ -73,7 +73,7 @@ func TestBuildEntry_NilMessage(t *testing.T) {
 }
 
 func TestBuildEntry_ForbiddenStatus(t *testing.T) {
-	r := httptest.NewRequest(http.MethodPost, "/mcp/myserver/message", nil)
+	r := httptest.NewRequest(http.MethodPost, "/mcp/myserver/message", http.NoBody)
 	ww := &mockWriter{status: 403, bytes: 0}
 	entry := BuildEntry(r, ww, uuid.Nil, time.Now())
 
@@ -86,7 +86,7 @@ func TestBuildEntry_ForbiddenStatus(t *testing.T) {
 }
 
 func TestBuildEntry_ErrorStatus(t *testing.T) {
-	r := httptest.NewRequest(http.MethodPost, "/mcp/myserver/message", nil)
+	r := httptest.NewRequest(http.MethodPost, "/mcp/myserver/message", http.NoBody)
 	ww := &mockWriter{status: 502, bytes: 0}
 	entry := BuildEntry(r, ww, uuid.Nil, time.Now())
 
@@ -99,7 +99,7 @@ func TestBuildEntry_ErrorStatus(t *testing.T) {
 }
 
 func TestExtractClientIP_RemoteAddr(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	r.RemoteAddr = "192.168.1.1:54321"
 
 	ip := extractClientIP(r)
@@ -109,7 +109,7 @@ func TestExtractClientIP_RemoteAddr(t *testing.T) {
 }
 
 func TestExtractClientIP_XForwardedFor(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-Forwarded-For", "10.0.0.1")
 
 	ip := extractClientIP(r)

@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/K3y5tr0ke/mcpgate/internal/config"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/K3y5tr0ke/mcpgate/internal/config"
 )
 
 // NewClient creates and validates a go-redis client from the given config.

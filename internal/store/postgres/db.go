@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/K3y5tr0ke/mcpgate/internal/config"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/K3y5tr0ke/mcpgate/internal/config"
 )
 
 // NewPool creates and validates a pgx connection pool from the given config.
