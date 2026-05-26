@@ -109,7 +109,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	// validate InResponseTo without a separate cookie (avoids SameSite=None requirement).
 	redirectTo := r.URL.Query().Get("redirect_to")
 	if redirectTo == "" {
-		redirectTo = "/"
+		redirectTo = "/console/dashboard"
 	}
 	relayState := authReq.ID + "|" + redirectTo
 

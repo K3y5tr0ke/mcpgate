@@ -12,7 +12,7 @@ BIN         := bin/mcpgate
         migrate-up migrate-down migrate-create \
         docker-up docker-down \
         ci ci-fast ci-services \
-        seed clean install-hooks help
+        seed seed-idp setup-dev clean install-hooks help
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -88,6 +88,21 @@ docker-down:
 seed:
 	$(GVM_GO) run ./cmd/mcpgate seed --config configs/mcpgate.dev.yaml
 
+# Upsert the Auth0 dev SAML IdP config into saml_idp_configs.
+# Idempotent — safe to run multiple times.
+seed-idp:
+	psql "$(DATABASE_URL)" -f scripts/seed_auth0_idp.sql
+
+# Full first-time dev environment setup.
+# Starts services, applies migrations, seeds DB + IdP, then starts servers.
+setup-dev:
+	docker compose -f deployments/docker/docker-compose.dev.yml up -d --wait postgres redis
+	$(MAKE) migrate-up
+	$(MAKE) seed
+	$(MAKE) seed-idp
+	$(MAKE) dev &
+	$(MAKE) dev-frontend
+
 # ── Local CI ──────────────────────────────────────────────────────────────────
 
 # Fast check: lint + unit tests + build — no Docker needed (~30s).
@@ -141,4 +156,6 @@ help:
 	@echo "  ci                 Full local CI pipeline (requires Docker)"
 	@echo "  install-hooks      Install git pre-push hook"
 	@echo "  seed               Seed database with default roles and admin user"
+	@echo "  seed-idp           Upsert Auth0 dev SAML IdP config into Postgres"
+	@echo "  setup-dev          Full first-time setup: services + migrate + seed + seed-idp + start"
 	@echo "  clean              Remove build artifacts"

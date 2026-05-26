@@ -3,74 +3,143 @@
 A production-grade reverse proxy for MCP (Model Context Protocol) servers.
 mcpgate sits between MCP clients (Claude Desktop, IDE extensions, custom agents)
 and upstream MCP servers, adding authentication (SAML 2.0), authorization (RBAC),
-structured audit logging, Prometheus metrics, and a React admin console — all
-without modifying MCP message semantics.
+structured audit logging, Prometheus metrics, and a React admin console — without
+modifying MCP message semantics.
 
 ```
 MCP Clients  →  mcpgate (auth · RBAC · logging · metrics)  →  Upstream MCP Servers
 ```
 
-## Quick start
+---
 
-**Prerequisites:** [gvm](https://github.com/moovweb/gvm) · Docker 24+ · Node.js 22+
+## Requirements
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| [gvm](https://github.com/moovweb/gvm) | any | Go version manager |
+| Go | 1.26.0 (via gvm) | Backend |
+| [Docker](https://docs.docker.com/get-docker/) | 24+ | Postgres, Redis, dev services |
+| [Node.js](https://nodejs.org/) | 22 LTS | Admin console frontend |
+| [nvm](https://github.com/nvm-sh/nvm) | any | Node version manager (optional but recommended) |
+| openssl | any | Dev certificate generation |
+| psql | any | `make seed-idp` — upsert IdP config |
+| [golang-migrate](https://github.com/golang-migrate/migrate) CLI | v4 | Database migrations |
+| [golangci-lint](https://golangci-lint.run/welcome/install/) | v2.12+ | Linting |
+
+### Installing requirements
+
+**gvm + Go 1.26.0**
+```bash
+bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
+source ~/.gvm/scripts/gvm
+gvm install go1.26.0 -B
+gvm use go1.26.0 --default
+```
+
+**Docker**
+Follow the official guide for your OS: https://docs.docker.com/get-docker/
+
+**Node.js 22 via nvm**
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash
+source ~/.nvm/nvm.sh
+nvm install 22
+nvm use 22
+```
+
+**golang-migrate CLI**
+```bash
+go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+```
+
+**golangci-lint**
+```bash
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+```
+
+**psql** (macOS)
+```bash
+brew install libpq
+brew link --force libpq
+```
+
+---
+
+## Quick start
 
 ```bash
 git clone https://github.com/K3y5tr0ke/mcpgate
 cd mcpgate
-bash scripts/setup.sh   # installs tools, starts services, runs migrations
-make dev                # starts the server on :8080
+
+# First-time tool installation (gvm, migrate, golangci-lint, certs, Docker services, migrations)
+bash scripts/setup.sh
+
+# Seed the DB and start everything (backend :8080 + frontend :5173)
+make setup-dev
 ```
 
 Check it's running:
-
 ```bash
-curl http://localhost:8080/health  # {"status":"ok"}
-curl http://localhost:8080/ready   # {"status":"ok"} (requires Postgres + Redis)
+curl http://localhost:8080/health   # {"status":"ok"}
+curl http://localhost:8080/ready    # {"status":"ok"} (requires Postgres + Redis)
 ```
 
-## Development
+Open the admin console: http://localhost:8080/console
 
-| Command | Description |
-|---------|-------------|
-| `make dev` | Run server with dev config |
-| `make test-unit` | Run unit tests (no external services) |
-| `make test-integration` | Run integration tests (requires Docker services) |
-| `make test-coverage` | Generate HTML coverage report |
-| `make lint` | Run golangci-lint |
-| `make migrate-up` | Apply pending database migrations |
-| `make migrate-down` | Roll back the last migration |
-| `make docker-up` | Start Postgres + Redis in Docker |
-| `make docker-down` | Stop Docker services |
-| `make seed` | Seed default roles and admin user |
-| `make build` | Compile binary to `bin/mcpgate` |
-| `make help` | Show all targets |
+---
 
-## Architecture
+## What's implemented
 
-```
-cmd/mcpgate/          Entry point (serve / migrate / seed / version)
-internal/
-  config/             koanf-based config loader (YAML + env vars)
-  server/             chi HTTP server, health/ready endpoints, graceful shutdown
-  proxy/              MCP proxy engine, transport adapters (Streamable HTTP, SSE, stdio)
-  auth/               SAML 2.0 SP, OAuth 2.0 server, JWT middleware
-  rbac/               Casbin RBAC enforcer + middleware
-  logging/            Async audit log pipeline, hash-chain tamper evidence
-  metrics/            Prometheus metrics registration
-  admin/api/          REST admin API (servers, users, roles, logs, metrics, settings)
-  store/
-    postgres/         pgx connection pool, repositories, SQL migrations
-    redis/            go-redis client, session cache, rate limiter, policy cache
-deployments/docker/   docker-compose.dev.yml, Dockerfile (Sprint 11)
-scripts/              setup.sh, generate-certs.sh, seed.sh
-configs/              mcpgate.example.yaml, mcpgate.dev.yaml
-```
+### Sprint 0 — Foundation
+- Go module (`github.com/K3y5tr0ke/mcpgate`), pinned to Go 1.26.0 via gvm
+- `koanf`-based config loader: YAML + `MCPGATE_` env var overrides
+- Store interfaces (`UserStore`, `SessionStore`, `ServerStore`, `RoleStore`, etc.)
+- Postgres (`pgx/v5`) and Redis (`go-redis/v9`) clients with connection pooling
+- `chi` HTTP server with `/health` and `/ready` endpoints, graceful shutdown
+- SQL migrations (`golang-migrate`) under `internal/store/postgres/migrations/`
+- Docker Compose dev stack (`deployments/docker/docker-compose.dev.yml`)
+- GitHub Actions CI pipeline
+- `scripts/setup.sh` — one-shot dev environment bootstrap
 
-See [docs/](docs/) for architecture deep-dives, deployment guides, and API reference.
+### Sprint 1 — Core Proxy Engine
+- MCP proxy handler supporting all three transports:
+  - **Streamable HTTP** (`POST /mcp/{serverName}/message`)
+  - **SSE** (`GET /mcp/{serverName}/sse`, `POST /mcp/{serverName}/sse`)
+  - **stdio** — subprocess-based upstream with JSON-RPC framing
+- JSON-RPC 2.0 parser and message router
+- Semaphore-bounded upstream HTTP connection pool
+- 30-second in-memory config cache for server lookups
+- `ServerStore` (`pgx` implementation) — full CRUD
+- Admin REST API skeleton: `GET/POST /api/v1/admin/servers`, `GET/PUT/DELETE /api/v1/admin/servers/{id}`
+- Prometheus metrics registration (`/metrics` on `:9090`)
+- `testcontainers-go` integration test helper + `MockMCPServer`
+
+### Sprint 2 — Authentication & Admin Console
+- **SAML 2.0 SP-initiated login** via [`crewjam/saml`](https://github.com/crewjam/saml):
+  - `GET  /auth/saml/login` — initiates HTTP-Redirect binding to IdP
+  - `POST /auth/saml/acs` — assertion consumer: validates signature, replay-detects, JIT-provisions user, issues JWT
+  - `GET  /auth/saml/metadata` — serves SP metadata XML
+  - `GET  /auth/saml/logout` — invalidates session + clears cookie
+- **RS256 JWT** session tokens (`golang-jwt/jwt/v5`); ephemeral key in dev, file-backed in prod
+- **Session management**: durable sessions in Postgres + sliding-window cache in Redis
+- **Auth middleware**: validates JWT → looks up live session → injects `UserIdentity` into context
+- **Brute-force guard**: Redis-backed rate limiting on login and ACS endpoints
+- **RBAC middleware**: role-check (`admin` required for all `/api/v1/admin/*` routes)
+- **JIT user provisioning**: auto-creates or links users from SAML assertions; attribute mapping from IdP claim URIs
+- **Replay detection**: Redis `SET NX` on assertion ID prevents replayed assertions
+- **IDP config CRUD**: `GET/POST /api/v1/admin/idps`, `GET/PUT/DELETE /api/v1/admin/idps/{id}`
+- **Auth0 integration**: pre-configured SAML IdP connection to Auth0 tenant via `make seed-idp`
+- **React admin console** (Vite + TanStack Router + Tailwind CSS):
+  - Dashboard with metrics summary + timeseries charts
+  - MCP Servers list
+  - Audit log viewer
+  - Served at `/console` from embedded `web/dist/`
+
+---
 
 ## Configuration
 
-Copy `configs/mcpgate.example.yaml` and edit, or use `MCPGATE_` env vars:
+Copy `configs/mcpgate.example.yaml`, or override with `MCPGATE_` env vars:
 
 ```bash
 MCPGATE_DATABASE.PASSWORD=secret \
@@ -78,19 +147,125 @@ MCPGATE_SERVER.PORT=9000 \
 ./bin/mcpgate serve --config configs/mcpgate.yaml
 ```
 
-Full reference: `configs/mcpgate.example.yaml`.
+Full annotated reference: [`configs/mcpgate.example.yaml`](configs/mcpgate.example.yaml)
+
+Sensitive values (JWT signing key path, DB password, Redis password) should be
+supplied via env vars or a secrets manager — never committed to the repo.
+The `.env` file is gitignored and holds local dev credentials only.
+
+---
+
+## Makefile targets
+
+### Setup & development
+
+| Target | Description |
+|--------|-------------|
+| `make setup-dev` | **Full first-time setup**: starts Docker services, applies migrations, seeds DB + Auth0 IdP config, then starts backend and frontend |
+| `make dev` | Run the backend server with dev config (`:8080`) |
+| `make dev-frontend` | Run the Vite dev server (`:5173`) with proxy to backend |
+| `make dev-all` | Start Docker services + backend + frontend (skips migrate/seed) |
+
+### Build
+
+| Target | Description |
+|--------|-------------|
+| `make build` | Build web assets then compile binary to `bin/mcpgate` |
+| `make build-web` | Build React admin console to `web/dist/` |
+| `make build-docker` | Build production Docker image |
+| `make clean` | Remove `bin/`, `web/dist/`, coverage artifacts |
+
+### Database
+
+| Target | Description |
+|--------|-------------|
+| `make migrate-up` | Apply all pending migrations |
+| `make migrate-down` | Roll back the last migration |
+| `make migrate-create name=<suffix>` | Create a new migration file pair |
+| `make seed` | Seed default roles and admin user |
+| `make seed-idp` | Upsert Auth0 dev SAML IdP config into Postgres (idempotent) |
+
+### Testing
+
+| Target | Description |
+|--------|-------------|
+| `make test-unit` | Unit tests — no external services required (`-short`) |
+| `make test-integration` | Integration tests — requires Postgres + Redis (`-tags=integration`) |
+| `make test-coverage` | Generate HTML coverage report at `coverage.html` |
+
+### Quality
+
+| Target | Description |
+|--------|-------------|
+| `make lint` | Run `golangci-lint` |
+| `make lint-fix` | Run `golangci-lint` with auto-fix |
+| `make security-scan` | Run `govulncheck` |
+
+### CI
+
+| Target | Description |
+|--------|-------------|
+| `make ci-fast` | Lint + unit tests + build — no Docker (~30 s); run by the pre-push git hook |
+| `make ci-services` | Start Postgres + Redis and wait until healthy |
+| `make ci` | Full local CI pipeline: lint → unit → services → migrate → integration → build → security scan |
+
+### Hooks & utilities
+
+| Target | Description |
+|--------|-------------|
+| `make install-hooks` | Install the pre-push git hook (`scripts/pre-push.hook → .git/hooks/pre-push`) |
+| `make docker-up` | Start all Docker services (Postgres, Redis, Prometheus, Grafana) |
+| `make docker-down` | Stop and remove all Docker services (destroys volumes) |
+| `make help` | Print all targets with descriptions |
+
+---
+
+## Architecture
+
+```
+cmd/mcpgate/              Entry point: serve / migrate / seed / version
+internal/
+  config/                 koanf config loader (YAML + MCPGATE_ env vars)
+  server/                 chi HTTP server, SPA handler, graceful shutdown
+  proxy/                  MCP proxy engine, transport adapters
+  auth/
+    jwt/                  RS256 JWT manager (Issue + Validate)
+    saml/                 SAML 2.0 SP: handlers, SP init, attribute mapping
+    middleware.go         TokenValidator interface + Authenticate() chi middleware
+    context.go            UserIdentity type + context helpers
+  rbac/                   RBAC middleware (role enforcement)
+  admin/api/              Admin REST API handlers (servers, users, idps, logs, metrics)
+  store/
+    interfaces.go         Store interface definitions + shared types
+    postgres/             pgx repositories (users, sessions, servers, roles, saml)
+    redis/                go-redis session cache + rate limiter
+  logging/                Async audit log pipeline, hash-chain tamper evidence
+  metrics/                Prometheus metrics registration
+web/                      React admin console (Vite + TanStack Router + Tailwind)
+deployments/docker/       docker-compose.dev.yml, Dockerfile
+scripts/                  setup.sh, generate-certs.sh, seed.sh, seed_auth0_idp.sql
+configs/                  mcpgate.example.yaml, mcpgate.dev.yaml
+certs/                    Dev TLS + SAML certificates (gitignored)
+docs/                     Architecture deep-dives, implementation notes, PRD
+```
+
+---
 
 ## Go version
 
 Pinned to `go1.26.0` via [gvm](https://github.com/moovweb/gvm). The Makefile
-uses `$HOME/.gvm/gos/go1.26.0/bin/go` directly — no PATH manipulation needed.
+invokes `$HOME/.gvm/gos/go1.26.0/bin/go` directly — no PATH manipulation required.
+
+---
 
 ## Contributing
 
 - Branching: short-lived feature branches off `main` (< 3 days)
-- Every PR requires passing CI (`lint → test-unit → test-integration → build`)
+- Every PR requires passing `make ci` (lint → unit → integration → build → security scan)
 - Security-sensitive PRs (auth, RBAC, crypto) require a second review
 - Definition of done: feature works end-to-end, unit test covers the happy path and at least one error path
+
+---
 
 ## License
 

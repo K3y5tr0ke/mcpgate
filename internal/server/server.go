@@ -361,9 +361,9 @@ func (s *Server) buildRouter() http.Handler {
 	// Admin console SPA — served at /console/* without auth middleware so that
 	// the browser can load the app before the JWT cookie is set.
 	// The SPA itself redirects unauthenticated users to /auth/saml/login.
-	r.Route("/console", func(r chi.Router) {
-		r.Handle("/*", consoleSPAHandler())
-	})
+	// r.Mount strips the /console prefix before the handler sees r.URL.Path,
+	// so consoleSPAHandler receives "/dashboard", "/assets/…", etc.
+	r.Mount("/console", consoleSPAHandler())
 	// Redirect bare /console to /console/dashboard.
 	r.Get("/console", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/console/dashboard", http.StatusFound)
