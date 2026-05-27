@@ -38,7 +38,7 @@ export function RolesListPage() {
   const [policyResource, setPolicyResource] = useState('')
   const [policyAction, setPolicyAction] = useState('*')
 
-  async function handleCreate(e: React.FormEvent<HTMLFormElement>) {
+  async function handleCreate(e: React.SyntheticEvent) {
     e.preventDefault()
     try {
       await createRole.mutateAsync({ name: newRoleName, description: newRoleDesc })
@@ -56,7 +56,7 @@ export function RolesListPage() {
     await deleteRole.mutateAsync(r.id)
   }
 
-  async function handleAddPolicy(e: React.FormEvent<HTMLFormElement>) {
+  async function handleAddPolicy(e: React.SyntheticEvent) {
     e.preventDefault()
     if (!policyRole || !policyResource) return
     await addPolicy.mutateAsync({
@@ -162,7 +162,7 @@ export function RolesListPage() {
               <select
                 value={policyRole}
                 onChange={(e) => setPolicyRole(e.target.value)}
-                className="h-9 rounded-md border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 required
               >
                 <option value="">Select role…</option>
@@ -188,7 +188,7 @@ export function RolesListPage() {
               <select
                 value={policyAction}
                 onChange={(e) => setPolicyAction(e.target.value)}
-                className="h-9 rounded-md border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 {ACTIONS.map((a) => (
                   <option key={a} value={a}>

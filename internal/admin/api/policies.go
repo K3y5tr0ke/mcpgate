@@ -26,11 +26,11 @@ func (h *policyHandler) add(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if body.Role == "" || body.Server == "" || body.Action == "" {
-		writeJSONError(w, http.StatusBadRequest, "role, server, and action are required")
+	if body.Subject == "" || body.Resource == "" || body.Action == "" {
+		writeJSONError(w, http.StatusBadRequest, "subject, resource, and action are required")
 		return
 	}
-	if err := h.enforcer.AddPolicy(r.Context(), body.Role, body.Server, body.Action); err != nil {
+	if err := h.enforcer.AddPolicy(r.Context(), body.Subject, body.Resource, body.Action); err != nil {
 		h.logger.Error("policies: add", "err", err)
 		writeJSONError(w, http.StatusInternalServerError, "failed to add policy")
 		return
@@ -46,11 +46,11 @@ func (h *policyHandler) remove(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if body.Role == "" || body.Server == "" || body.Action == "" {
-		writeJSONError(w, http.StatusBadRequest, "role, server, and action are required")
+	if body.Subject == "" || body.Resource == "" || body.Action == "" {
+		writeJSONError(w, http.StatusBadRequest, "subject, resource, and action are required")
 		return
 	}
-	if err := h.enforcer.RemovePolicy(r.Context(), body.Role, body.Server, body.Action); err != nil {
+	if err := h.enforcer.RemovePolicy(r.Context(), body.Subject, body.Resource, body.Action); err != nil {
 		h.logger.Error("policies: remove", "err", err)
 		writeJSONError(w, http.StatusInternalServerError, "failed to remove policy")
 		return

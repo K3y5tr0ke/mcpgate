@@ -35,9 +35,10 @@ m = r.sub == p.sub && (p.obj == "*" || r.obj == p.obj) && (p.act == "*" || r.act
 
 // PolicyRule is the wire type for policy CRUD operations.
 type PolicyRule struct {
-	Role   string `json:"role"`
-	Server string `json:"server"`
-	Action string `json:"action"`
+	Subject  string `json:"subject"`
+	Resource string `json:"resource"`
+	Action   string `json:"action"`
+	Effect   string `json:"effect,omitempty"`
 }
 
 // Enforcer wraps a Casbin enforcer with a PolicyCache for fast decision lookups.
@@ -154,7 +155,7 @@ func (e *Enforcer) ListPolicies() []PolicyRule {
 	out := make([]PolicyRule, 0, len(rules))
 	for _, r := range rules {
 		if len(r) >= 3 {
-			out = append(out, PolicyRule{Role: r[0], Server: r[1], Action: r[2]})
+			out = append(out, PolicyRule{Subject: r[0], Resource: r[1], Action: r[2], Effect: "allow"})
 		}
 	}
 	return out
