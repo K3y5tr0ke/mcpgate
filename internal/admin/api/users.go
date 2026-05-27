@@ -18,7 +18,7 @@ type userHandler struct {
 }
 
 func (h *userHandler) list(w http.ResponseWriter, r *http.Request) {
-	users, _, err := h.store.List(r.Context(), store.UserFilter{}, store.Pagination{PageSize: 100})
+	users, total, err := h.store.List(r.Context(), store.UserFilter{}, store.Pagination{PageSize: 100})
 	if err != nil {
 		h.logger.Error("users: list", "err", err)
 		writeJSONError(w, http.StatusInternalServerError, "failed to list users")
@@ -27,7 +27,7 @@ func (h *userHandler) list(w http.ResponseWriter, r *http.Request) {
 	if users == nil {
 		users = []store.User{}
 	}
-	writeJSON(w, http.StatusOK, users)
+	writeJSON(w, http.StatusOK, map[string]any{"users": users, "total": total})
 }
 
 func (h *userHandler) get(w http.ResponseWriter, r *http.Request) {

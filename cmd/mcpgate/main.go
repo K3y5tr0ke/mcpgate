@@ -110,8 +110,10 @@ func cmdSeed(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	// Seed logic (default roles, admin user) is implemented in Sprint 1.
-	fmt.Println("seed: not yet implemented — coming in Sprint 1")
+	// Default roles (admin, developer, readonly) are seeded by migration 003_rbac_seed.
+	// Local admin account creation is implemented in Sprint 8 (Track E).
+	fmt.Println("Default roles are seeded by database migrations (make migrate-up).")
+	fmt.Println("Local admin account creation: coming in Sprint 8.")
 	return nil
 }
 

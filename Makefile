@@ -2,6 +2,9 @@ SHELL := /bin/bash
 
 GO_VERSION := go1.26.0
 GVM_GO     := $(HOME)/.gvm/gos/$(GO_VERSION)/bin/go
+# Bootstrap nvm so npm/node are on PATH in non-interactive shells (Makefile, git hooks).
+# Usage: $(NVM) npm ci   →  sources nvm then runs the rest of the line.
+NVM        := export NVM_DIR="$${NVM_DIR:-$$HOME/.nvm}"; [ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh";
 DATABASE_URL ?= postgres://mcpgate:devpassword@localhost:5432/mcpgate?sslmode=disable
 MIGRATIONS  := internal/store/postgres/migrations
 BIN         := bin/mcpgate
@@ -17,7 +20,7 @@ BIN         := bin/mcpgate
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 build-web:
-	cd web && npm ci && npm run build
+	$(NVM) cd web && npm ci && npm run build
 
 build: build-web
 	CGO_ENABLED=0 $(GVM_GO) build -ldflags="-s -w" -o $(BIN) ./cmd/mcpgate
@@ -31,7 +34,7 @@ dev:
 	$(GVM_GO) run ./cmd/mcpgate serve --config configs/mcpgate.dev.yaml
 
 dev-frontend:
-	cd web && npm run dev
+	$(NVM) cd web && npm run dev
 
 # Start Postgres + Redis in Docker, then run the backend and frontend
 dev-all:
