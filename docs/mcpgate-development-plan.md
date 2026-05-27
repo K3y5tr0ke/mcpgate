@@ -187,7 +187,7 @@ seed:
 | 0.1 | Initialize Go module, directory structure per PRD Section 11 | Tech Lead | 4h | `go build ./...` succeeds. All packages compile. |
 | 0.2 | Makefile with build, test, lint, dev targets | Tech Lead | 2h | `make build`, `make test-unit`, `make lint` all succeed. |
 | 0.3 | golangci-lint configuration (.golangci.yml) | Tech Lead | 1h | Linter runs with strict settings: govet, errcheck, staticcheck, gosec, revive, gocritic, exhaustive. |
-| 0.4 | GitHub Actions CI pipeline: lint → test-unit → build | Proxy Eng | 4h | Pipeline runs on every push and PR. Badge in README. |
+| 0.4 | CI pipeline: lint → test-unit → build | Proxy Eng | 4h | Pipeline runs on every push and PR. Badge in README. |
 | 0.5 | docker-compose.dev.yml with PostgreSQL 16 + Redis 7 | Proxy Eng | 2h | `docker-compose up` starts both services. Health checks pass. |
 | 0.6 | Configuration system (internal/config) | Tech Lead | 4h | Loads from YAML file, env vars (MCPGATE_ prefix), and CLI flags. Validates required fields. Unit tests for merge order and validation. |
 | 0.7 | Database connection pool (internal/store/postgres) | Proxy Eng | 3h | pgx pool connects to PostgreSQL. Connection test in CI (testcontainers). |
@@ -427,7 +427,7 @@ mcpgate's role is to validate M2M JWTs via a database-driven JWKS config store (
 | 11.9 | SAML setup guide (docs/saml-setup.md) | Auth Eng | 3h | Step-by-step SAML integration for Okta, Azure AD, and Google Workspace. Screenshots of IdP configuration. Attribute mapping examples. Troubleshooting section. |
 | 11.10 | API reference (docs/api-reference.md) | Tech Lead | 4h | Every endpoint documented: method, path, auth requirement, request body schema, response schema, error codes, example curl commands. Generated from OpenAPI spec if time permits. |
 | 11.11 | Runbook (docs/runbook.md) | Proxy Eng | 3h | Operational runbook: common issues and resolution (SAML assertion errors, upstream connection failures, high latency diagnosis, log pipeline backup, certificate rotation). Alert response procedures. |
-| 11.12 | CI pipeline: release workflow | Proxy Eng | 3h | GitHub Actions workflow triggered on version tag. Builds Docker image, runs full test suite, signs image, generates SBOM, creates GitHub release with changelog, pushes to container registry. |
+| 11.12 | CI pipeline: release workflow | Proxy Eng | 3h | Workflow triggered on version tag. Builds Docker image, runs full test suite, signs image, generates SBOM, creates release with changelog, pushes to container registry. |
 
 **Sprint 11 deliverable:** A tagged v1.0 release with signed Docker image, Helm chart, and comprehensive documentation.
 
