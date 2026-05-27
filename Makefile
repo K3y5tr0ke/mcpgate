@@ -15,7 +15,7 @@ BIN         := bin/mcpgate
         migrate-up migrate-down migrate-create \
         docker-up docker-down \
         ci ci-fast ci-services \
-        seed seed-idp setup-dev clean install-hooks help
+        seed seed-idp setup-dev stop clean install-hooks help
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -131,6 +131,9 @@ install-hooks:
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
+stop:
+	@lsof -ti :8080 -ti :9090 2>/dev/null | sort -u | xargs kill 2>/dev/null && echo "mcpgate stopped" || echo "mcpgate not running"
+
 clean:
 	rm -rf bin/ coverage.out coverage.html web/dist/
 
@@ -161,4 +164,5 @@ help:
 	@echo "  seed               Seed database with default roles and admin user"
 	@echo "  seed-idp           Upsert Auth0 dev SAML IdP config into Postgres"
 	@echo "  setup-dev          Full first-time setup: services + migrate + seed + seed-idp + start"
+	@echo "  stop               Kill the running mcpgate server (ports 8080 + 9090)"
 	@echo "  clean              Remove build artifacts"
