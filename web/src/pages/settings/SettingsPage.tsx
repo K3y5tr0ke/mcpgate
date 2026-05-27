@@ -63,7 +63,7 @@ export function SettingsPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Settings</h1>
 
         {isLoading ? (
           <p className="text-sm text-gray-400">Loading…</p>

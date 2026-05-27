@@ -135,7 +135,7 @@ export function IdpListPage() {
     <AppShell>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-gray-900">SAML Identity Providers</h1>
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">SAML Identity Providers</h1>
           <Button onClick={openCreate}>Add IdP</Button>
         </div>
 

@@ -133,7 +133,7 @@ export function JwksListPage() {
     <AppShell>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-gray-900">JWKS Configs</h1>
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">JWKS Configs</h1>
           <Button onClick={openCreate}>Add config</Button>
         </div>
 

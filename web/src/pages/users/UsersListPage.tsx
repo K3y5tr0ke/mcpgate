@@ -93,7 +93,7 @@ export function UsersListPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <h1 className="text-xl font-semibold text-gray-900">Users</h1>
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Users</h1>
 
         <div className="flex gap-3">
           <Input

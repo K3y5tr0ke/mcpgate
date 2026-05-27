@@ -7,7 +7,7 @@ function StatCard({ label, value, sub }: { label: string; value: React.ReactNode
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-5">
       <p className="text-xs font-medium uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-gray-900">{value}</p>
+      <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{value}</p>
       {sub && <p className="mt-0.5 text-xs text-gray-400">{sub}</p>}
     </div>
   )
@@ -53,7 +53,7 @@ export function MetricsPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <h1 className="text-xl font-semibold text-gray-900">Metrics</h1>
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Metrics</h1>
 
         {summaryLoading ? (
           <p className="text-sm text-gray-400">Loading…</p>

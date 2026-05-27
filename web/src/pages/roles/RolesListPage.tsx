@@ -77,7 +77,7 @@ export function RolesListPage() {
       key: 'name',
       header: 'Name',
       render: (r) => (
-        <span className="font-medium text-gray-900">
+        <span className="font-medium text-gray-900 dark:text-white">
           {r.name}
           {r.is_system && (
             <Badge color="purple" className="ml-2">
@@ -135,7 +135,7 @@ export function RolesListPage() {
     <AppShell>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-gray-900">Roles</h1>
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Roles</h1>
           <Button onClick={() => setCreateOpen(true)}>New role</Button>
         </div>
 
@@ -158,11 +158,11 @@ export function RolesListPage() {
         <Card title="Access policies (raw)">
           <form onSubmit={handleAddPolicy} className="mb-4 flex flex-wrap gap-2 items-end">
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-500">Role</label>
+              <label className="text-xs text-gray-500 dark:text-gray-400">Role</label>
               <select
                 value={policyRole}
                 onChange={(e) => setPolicyRole(e.target.value)}
-                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                 required
               >
                 <option value="">Select role…</option>
@@ -174,21 +174,21 @@ export function RolesListPage() {
               </select>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-500">Resource (server name or *)</label>
+              <label className="text-xs text-gray-500 dark:text-gray-400">Resource (server name or *)</label>
               <input
                 value={policyResource}
                 onChange={(e) => setPolicyResource(e.target.value)}
                 placeholder="e.g. my-server"
-                className="h-9 w-40 rounded-md border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="h-9 w-40 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                 required
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-500">Action</label>
+              <label className="text-xs text-gray-500 dark:text-gray-400">Action</label>
               <select
                 value={policyAction}
                 onChange={(e) => setPolicyAction(e.target.value)}
-                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
               >
                 {ACTIONS.map((a) => (
                   <option key={a} value={a}>

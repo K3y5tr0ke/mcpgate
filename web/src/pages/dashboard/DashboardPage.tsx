@@ -33,7 +33,7 @@ export function DashboardPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Dashboard</h1>
 
         {/* Metrics strip */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
