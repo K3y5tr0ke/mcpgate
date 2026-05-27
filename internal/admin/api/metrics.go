@@ -200,15 +200,15 @@ func (h *metricsHandler) timeseries(w http.ResponseWriter, r *http.Request) {
 	pipe := h.redis.Pipeline()
 	cmds := make([]*goredis.StringCmd, numBuckets)
 	for i := 0; i < numBuckets; i++ {
-		min := now - int64(numBuckets-1-i)
-		cmds[i] = pipe.Get(ctx, fmt.Sprintf("metrics:ts:%d", min))
+		bucketMin := now - int64(numBuckets-1-i)
+		cmds[i] = pipe.Get(ctx, fmt.Sprintf("metrics:ts:%d", bucketMin))
 	}
 	_, _ = pipe.Exec(ctx)
 
 	buckets := make([]bucket, numBuckets)
 	for i, cmd := range cmds {
-		min := now - int64(numBuckets-1-i)
-		buckets[i].Minute = min
+		bucketMin := now - int64(numBuckets-1-i)
+		buckets[i].Minute = bucketMin
 		if val, err := cmd.Result(); err == nil {
 			if n, err := strconv.ParseInt(val, 10, 64); err == nil {
 				buckets[i].Requests = n

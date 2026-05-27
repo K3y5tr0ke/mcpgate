@@ -146,7 +146,8 @@ func cmdSeed(args []string) error {
 	}
 
 	user, err := userStore.GetByEmail(ctx, adminEmail)
-	if errors.Is(err, store.ErrNotFound) {
+	switch {
+	case errors.Is(err, store.ErrNotFound):
 		user = &store.User{
 			ID:          uuid.New(),
 			Email:       adminEmail,
@@ -160,9 +161,9 @@ func cmdSeed(args []string) error {
 			return fmt.Errorf("create admin user: %w", err)
 		}
 		fmt.Println("Created local admin user:", adminEmail)
-	} else if err != nil {
+	case err != nil:
 		return fmt.Errorf("lookup admin user: %w", err)
-	} else {
+	default:
 		fmt.Println("Resetting password for existing local admin:", adminEmail)
 	}
 

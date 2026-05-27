@@ -272,10 +272,10 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 	)
 
 	s := &Server{
-		cfg:          cfg,
-		logger:       logger,
-		db:           db,
-		redis:        redisClient,
+		cfg:           cfg,
+		logger:        logger,
+		db:            db,
+		redis:         redisClient,
 		proxyHandler:  proxyHandler,
 		overrideStore: overrideStore,
 		adminRouter: api.NewRouter(
