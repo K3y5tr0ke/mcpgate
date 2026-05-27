@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -8,6 +9,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -60,7 +62,13 @@ type Collector struct {
 
 	rpmCounter *MinuteCounter
 	registry   *prometheus.Registry
+	redis      goredis.Cmdable
 }
+
+// WithRedis wires a Redis client so Middleware() persists per-minute request
+// counts to keys of the form "metrics:ts:<unix_minute>" with a 7-day TTL.
+// Call this once after NewCollector() and before the server starts.
+func (c *Collector) WithRedis(client goredis.Cmdable) { c.redis = client }
 
 // NewCollector registers all metrics and returns a ready-to-use Collector.
 func NewCollector() *Collector {
@@ -154,6 +162,14 @@ func (c *Collector) Middleware() func(http.Handler) http.Handler {
 			c.ActiveRequests.WithLabelValues(server).Inc()
 			c.rpmCounter.Inc()
 			defer c.ActiveRequests.WithLabelValues(server).Dec()
+
+			if c.redis != nil {
+				now := time.Now()
+				key := fmt.Sprintf("metrics:ts:%d", now.Unix()/60)
+				ctx := r.Context()
+				c.redis.Incr(ctx, key)
+				c.redis.Expire(ctx, key, 7*24*time.Hour)
+			}
 
 			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 			start := time.Now()

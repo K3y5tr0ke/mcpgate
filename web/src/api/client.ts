@@ -22,7 +22,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (res.status === 401) {
     localStorage.removeItem('mcpgate_token')
-    window.location.href = '/auth/saml/login?redirect_to=/console/dashboard'
+    window.location.href = '/auth/local/login?redirect_to=/console/dashboard'
     throw new ApiError(401, 'Unauthorized')
   }
 

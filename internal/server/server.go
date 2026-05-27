@@ -22,6 +22,7 @@ import (
 	"github.com/K3y5tr0ke/mcpgate/internal/auth"
 	jwkspkg "github.com/K3y5tr0ke/mcpgate/internal/auth/jwks"
 	jwtpkg "github.com/K3y5tr0ke/mcpgate/internal/auth/jwt"
+	localpkg "github.com/K3y5tr0ke/mcpgate/internal/auth/local"
 	"github.com/K3y5tr0ke/mcpgate/internal/auth/rbac"
 	samlpkg "github.com/K3y5tr0ke/mcpgate/internal/auth/saml"
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
@@ -43,8 +44,10 @@ type Server struct {
 	db               *pgxpool.Pool
 	redis            *redis.Client
 	proxyHandler     *proxy.Handler
+	overrideStore    store.RateLimitOverrideStore
 	adminRouter      *api.Router
 	samlHandlers     *samlpkg.Handlers
+	localHandlers    *localpkg.Handlers
 	jwtManager       *jwtpkg.Manager
 	sessionCache     *redisstore.SessionCache
 	sessionStore     store.SessionStore
@@ -71,6 +74,7 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 	userStore := pgstore.NewUserStore(db)
 	sessionStore := pgstore.NewSessionStore(db)
 	roleStore := pgstore.NewRoleStore(db)
+	overrideStore := pgstore.NewRateLimitOverrideStore(db)
 	samlIDPStore := pgstore.NewSAMLIDPConfigStore(db)
 	jwksStore := pgstore.NewJWKSConfigStore(db)
 	auditStore := pgstore.NewAuditLogStore(db)
@@ -120,6 +124,7 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 
 	// Metrics collector (dedicated registry — safe for concurrent test instances).
 	collector := metrics.NewCollector()
+	collector.WithRedis(redisClient)
 
 	// Tracing provider (no-op when OTLP is disabled).
 	tracingProvider, err := tracing.New(cfg.Metrics.OTLP, "mcpgate")
@@ -261,18 +266,25 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 	proxyHandler := proxy.NewHandler(cfg.Proxy, serverStore, logger)
 	proxyHandler.WithMetrics(collector)
 
+	localHandlers := localpkg.NewHandlers(
+		userStore, sessionStore, sessionCache, roleStore,
+		jwtManager, redisClient, cfg.Auth, logger,
+	)
+
 	s := &Server{
 		cfg:          cfg,
 		logger:       logger,
 		db:           db,
 		redis:        redisClient,
-		proxyHandler: proxyHandler,
+		proxyHandler:  proxyHandler,
+		overrideStore: overrideStore,
 		adminRouter: api.NewRouter(
-			serverStore, samlIDPStore, jwksStore, roleStore, userStore,
+			serverStore, samlIDPStore, jwksStore, roleStore, overrideStore, userStore,
 			auditStore, settingsStore, pipeline, enforcer,
-			proxyHandler, collector, db, logger,
+			proxyHandler, collector, db, redisClient, logger,
 		),
 		samlHandlers:     samlHandlers,
+		localHandlers:    localHandlers,
 		jwtManager:       jwtManager,
 		sessionCache:     sessionCache,
 		sessionStore:     sessionStore,
@@ -325,6 +337,9 @@ func (s *Server) buildRouter() http.Handler {
 		r.Get("/logout", s.samlHandlers.Logout)
 	})
 
+	// Local admin login — no auth middleware.
+	r.Post("/auth/local/login", s.localHandlers.Login)
+
 	// Identity endpoint — auth only, no role required.
 	r.Group(func(r chi.Router) {
 		r.Use(s.authMiddleware)
@@ -344,7 +359,7 @@ func (s *Server) buildRouter() http.Handler {
 		r.Use(s.authMiddleware)
 		r.Use(logging.Middleware(s.pipeline, s.serverStore))
 		r.Use(s.metricsCollector.Middleware())
-		r.Use(ratelimit.Middleware(s.rateLimiter, s.cfg.RateLimiting, s.metricsCollector, s.logger))
+		r.Use(ratelimit.Middleware(s.rateLimiter, s.overrideStore, s.cfg.RateLimiting, s.metricsCollector, s.logger))
 		r.Use(rbac.Authorize(s.enforcer, s.logger))
 		r.Post("/message", s.proxyHandler.HandleStreamableHTTP)
 		r.Get("/sse", s.proxyHandler.HandleSSEStream)

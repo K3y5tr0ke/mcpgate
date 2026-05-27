@@ -13,8 +13,9 @@ import (
 )
 
 type roleHandler struct {
-	store  store.RoleStore
-	logger *slog.Logger
+	store     store.RoleStore
+	overrides store.RateLimitOverrideStore
+	logger    *slog.Logger
 }
 
 func (h *roleHandler) list(w http.ResponseWriter, r *http.Request) {
@@ -205,4 +206,77 @@ func (h *roleHandler) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *roleHandler) getRateLimits(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid role ID")
+		return
+	}
+	role, err := h.store.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSONError(w, http.StatusNotFound, "role not found")
+			return
+		}
+		h.logger.Error("roles: rate limits get role", "err", err)
+		writeJSONError(w, http.StatusInternalServerError, "failed to get role")
+		return
+	}
+	entry, err := h.overrides.GetByRole(r.Context(), role.Name)
+	if errors.Is(err, store.ErrNotFound) {
+		// No override — return zeros to signal "use global defaults".
+		writeJSON(w, http.StatusOK, map[string]int{"rpm": 0, "rpd": 0})
+		return
+	}
+	if err != nil {
+		h.logger.Error("roles: rate limits get override", "err", err)
+		writeJSONError(w, http.StatusInternalServerError, "failed to get rate limit override")
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
+}
+
+func (h *roleHandler) putRateLimits(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid role ID")
+		return
+	}
+	role, err := h.store.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSONError(w, http.StatusNotFound, "role not found")
+			return
+		}
+		h.logger.Error("roles: rate limits put role", "err", err)
+		writeJSONError(w, http.StatusInternalServerError, "failed to get role")
+		return
+	}
+	var body struct {
+		RPM int `json:"rpm"`
+		RPD int `json:"rpd"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.RPM == 0 && body.RPD == 0 {
+		// Both zero means "remove override, revert to global defaults".
+		if err := h.overrides.Delete(r.Context(), role.Name); err != nil {
+			h.logger.Error("roles: rate limits delete override", "err", err)
+			writeJSONError(w, http.StatusInternalServerError, "failed to delete rate limit override")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	entry := &store.RateLimitOverrideEntry{RoleName: role.Name, RPM: body.RPM, RPD: body.RPD}
+	if err := h.overrides.Upsert(r.Context(), entry); err != nil {
+		h.logger.Error("roles: rate limits upsert override", "err", err)
+		writeJSONError(w, http.StatusInternalServerError, "failed to save rate limit override")
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
 }

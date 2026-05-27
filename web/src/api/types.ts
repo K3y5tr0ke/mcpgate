@@ -84,6 +84,31 @@ export interface Policy {
   effect: string
 }
 
+export interface SAMLIdP {
+  id: string
+  name: string
+  entity_id: string
+  sso_url: string
+  slo_url: string | null
+  certificate: string
+  attribute_map: Record<string, string>
+  group_role_map: Record<string, string>
+  is_enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface JWKSConfig {
+  id: string
+  name: string
+  issuer: string
+  jwks_url: string
+  audience: string
+  is_enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
 export type Settings = Record<string, number | string | boolean>
 
 export interface RateLimitOverride {

@@ -16,6 +16,7 @@ import { Modal } from '../../components/ui/Modal'
 import { Input } from '../../components/ui/Input'
 import { Table } from '../../components/ui/Table'
 import type { Column } from '../../components/ui/Table'
+import { PolicyMatrix } from '../../components/roles/PolicyMatrix'
 
 const ACTIONS = ['tools/call', 'tools/list', 'resources/read', 'prompts/get', '*']
 
@@ -37,7 +38,7 @@ export function RolesListPage() {
   const [policyResource, setPolicyResource] = useState('')
   const [policyAction, setPolicyAction] = useState('*')
 
-  async function handleCreate(e: React.FormEvent) {
+  async function handleCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     try {
       await createRole.mutateAsync({ name: newRoleName, description: newRoleDesc })
@@ -55,7 +56,7 @@ export function RolesListPage() {
     await deleteRole.mutateAsync(r.id)
   }
 
-  async function handleAddPolicy(e: React.FormEvent) {
+  async function handleAddPolicy(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!policyRole || !policyResource) return
     await addPolicy.mutateAsync({
@@ -142,7 +143,19 @@ export function RolesListPage() {
           <Table columns={roleColumns} data={roles} keyFn={(r) => r.id} />
         </Card>
 
-        <Card title="Access policies">
+        <Card title="Policy matrix">
+          <p className="mb-3 text-xs text-gray-400">Click a cell to toggle allow/deny. Rows = roles, columns = servers + wildcard (*). Actions: All / call / list / read / prompts.</p>
+          <PolicyMatrix
+            roles={roles}
+            policies={policies}
+            onAdd={(subject, resource, action) =>
+              addPolicy.mutateAsync({ subject, resource, action, effect: 'allow' })
+            }
+            onRemove={handleRemovePolicy}
+          />
+        </Card>
+
+        <Card title="Access policies (raw)">
           <form onSubmit={handleAddPolicy} className="mb-4 flex flex-wrap gap-2 items-end">
             <div className="flex flex-col gap-1">
               <label className="text-xs text-gray-500">Role</label>

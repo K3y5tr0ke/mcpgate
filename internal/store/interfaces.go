@@ -17,6 +17,7 @@ type UserStore interface {
 	List(ctx context.Context, filter UserFilter, page Pagination) ([]User, int64, error)
 	Update(ctx context.Context, user *User) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	SetPasswordHash(ctx context.Context, id uuid.UUID, hash string) error
 }
 
 // ServerStore manages upstream MCP server configurations.
@@ -79,6 +80,11 @@ type PolicyCache interface {
 // RateLimiter enforces per-user and per-role rate limits using Redis sliding windows.
 type RateLimiter interface {
 	Allow(ctx context.Context, key string, limit RateLimit) (RateLimitResult, error)
+	// StartConcurrent increments the concurrent-connection counter for key and
+	// checks it against limit. Returns (overLimit=true, noop, nil) when exceeded.
+	// The returned cleanup func MUST be deferred to decrement the counter on disconnect.
+	// limit <= 0 disables the check. Fail-open on Redis errors.
+	StartConcurrent(ctx context.Context, key string, limit int) (overLimit bool, cleanup func(), err error)
 }
 
 // RateLimitOverrideStore manages per-role RPM/RPD overrides stored in the database.
@@ -122,15 +128,16 @@ type SAMLIDPConfigStore interface {
 // --- Domain types ---
 
 type User struct {
-	ID          uuid.UUID      `db:"id"           json:"id"`
-	Email       string         `db:"email"        json:"email"`
-	DisplayName string         `db:"display_name" json:"display_name"`
-	IDPSubject  string         `db:"idp_subject"  json:"idp_subject"`
-	IDPName     string         `db:"idp_name"     json:"idp_name"`
-	Status      string         `db:"status"       json:"status"`
-	Metadata    map[string]any `db:"metadata"     json:"metadata"`
-	CreatedAt   time.Time      `db:"created_at"   json:"created_at,omitempty"`
-	UpdatedAt   time.Time      `db:"updated_at"   json:"updated_at,omitempty"`
+	ID           uuid.UUID      `db:"id"            json:"id"`
+	Email        string         `db:"email"         json:"email"`
+	DisplayName  string         `db:"display_name"  json:"display_name"`
+	IDPSubject   string         `db:"idp_subject"   json:"idp_subject"`
+	IDPName      string         `db:"idp_name"      json:"idp_name"`
+	Status       string         `db:"status"        json:"status"`
+	Metadata     map[string]any `db:"metadata"      json:"metadata"`
+	PasswordHash *string        `db:"password_hash" json:"-"`
+	CreatedAt    time.Time      `db:"created_at"    json:"created_at,omitempty"`
+	UpdatedAt    time.Time      `db:"updated_at"    json:"updated_at,omitempty"`
 }
 
 type Role struct {

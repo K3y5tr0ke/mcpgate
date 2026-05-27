@@ -1,12 +1,16 @@
 package api
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
 )
@@ -23,6 +27,7 @@ type metricsHandler struct {
 	collector    metricsProvider
 	proxyHandler *proxy.Handler
 	db           *pgxpool.Pool
+	redis        *goredis.Client
 	logger       *slog.Logger
 }
 
@@ -172,14 +177,43 @@ func histogramP95MS(mfs []*dto.MetricFamily, name string) float64 {
 	return 0
 }
 
-// timeseries returns bucketed request counts for the dashboard sparklines.
-// This is a placeholder implementation that returns the current RPM as a single-point series.
-// A full implementation would read per-minute Redis keys (planned for Sprint 8).
+// timeseries returns the last 60 per-minute request counts for dashboard sparklines.
+// Keys follow the pattern "metrics:ts:<unix_minute>" written by the metrics middleware.
+// Falls back to a single-point series when Redis is unavailable.
 func (h *metricsHandler) timeseries(w http.ResponseWriter, r *http.Request) {
 	type bucket struct {
+		Minute   int64 `json:"minute"` // unix minute (epoch seconds / 60)
 		Requests int64 `json:"requests"`
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"buckets": []bucket{{Requests: h.collector.RequestsLastMinute()}},
-	})
+
+	const numBuckets = 60
+	now := time.Now().Unix() / 60
+
+	if h.redis == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"buckets": []bucket{{Minute: now, Requests: h.collector.RequestsLastMinute()}},
+		})
+		return
+	}
+
+	ctx := r.Context()
+	pipe := h.redis.Pipeline()
+	cmds := make([]*goredis.StringCmd, numBuckets)
+	for i := 0; i < numBuckets; i++ {
+		min := now - int64(numBuckets-1-i)
+		cmds[i] = pipe.Get(ctx, fmt.Sprintf("metrics:ts:%d", min))
+	}
+	_, _ = pipe.Exec(ctx)
+
+	buckets := make([]bucket, numBuckets)
+	for i, cmd := range cmds {
+		min := now - int64(numBuckets-1-i)
+		buckets[i].Minute = min
+		if val, err := cmd.Result(); err == nil {
+			if n, err := strconv.ParseInt(val, 10, 64); err == nil {
+				buckets[i].Requests = n
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"buckets": buckets})
 }

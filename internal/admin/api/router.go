@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/auth/rbac"
 	"github.com/K3y5tr0ke/mcpgate/internal/logging"
@@ -20,6 +21,7 @@ type Router struct {
 	idps         store.SAMLIDPConfigStore
 	jwks         store.JWKSConfigStore
 	roles        store.RoleStore
+	overrides    store.RateLimitOverrideStore
 	users        store.UserStore
 	auditStore   store.AuditLogStore
 	settings     store.SettingsStore
@@ -28,6 +30,7 @@ type Router struct {
 	proxyHandler *proxy.Handler
 	collector    metricsProvider
 	db           *pgxpool.Pool
+	redis        *goredis.Client
 	logger       *slog.Logger
 }
 
@@ -37,6 +40,7 @@ func NewRouter(
 	idps store.SAMLIDPConfigStore,
 	jwks store.JWKSConfigStore,
 	roles store.RoleStore,
+	overrides store.RateLimitOverrideStore,
 	users store.UserStore,
 	auditStore store.AuditLogStore,
 	settings store.SettingsStore,
@@ -45,6 +49,7 @@ func NewRouter(
 	proxyHandler *proxy.Handler,
 	collector metricsProvider,
 	db *pgxpool.Pool,
+	redis *goredis.Client,
 	logger *slog.Logger,
 ) *Router {
 	return &Router{
@@ -52,6 +57,7 @@ func NewRouter(
 		idps:         idps,
 		jwks:         jwks,
 		roles:        roles,
+		overrides:    overrides,
 		users:        users,
 		auditStore:   auditStore,
 		settings:     settings,
@@ -60,6 +66,7 @@ func NewRouter(
 		proxyHandler: proxyHandler,
 		collector:    collector,
 		db:           db,
+		redis:        redis,
 		logger:       logger,
 	}
 }
@@ -71,11 +78,11 @@ func (rt *Router) Handler() http.Handler {
 	sh := &serverHandler{servers: rt.servers, proxyHandler: rt.proxyHandler, logger: rt.logger}
 	ih := &idpHandler{idps: rt.idps, logger: rt.logger}
 	jh := &jwksHandler{store: rt.jwks, logger: rt.logger}
-	rh := &roleHandler{store: rt.roles, logger: rt.logger}
+	rh := &roleHandler{store: rt.roles, overrides: rt.overrides, logger: rt.logger}
 	uh := &userHandler{store: rt.users, logger: rt.logger}
 	ph := &policyHandler{enforcer: rt.enforcer, logger: rt.logger}
 	lh := &logHandler{store: rt.auditStore, pipeline: rt.pipeline, logger: rt.logger}
-	mh := &metricsHandler{collector: rt.collector, proxyHandler: rt.proxyHandler, db: rt.db, logger: rt.logger}
+	mh := &metricsHandler{collector: rt.collector, proxyHandler: rt.proxyHandler, db: rt.db, redis: rt.redis, logger: rt.logger}
 	sth := &settingsHandler{store: rt.settings, logger: rt.logger}
 
 	r.Route("/servers", func(r chi.Router) {
@@ -118,6 +125,8 @@ func (rt *Router) Handler() http.Handler {
 			r.Delete("/", rh.delete)
 			r.Post("/users", rh.assign)
 			r.Delete("/users/{userID}", rh.revoke)
+			r.Get("/rate-limits", rh.getRateLimits)
+			r.Put("/rate-limits", rh.putRateLimits)
 		})
 	})
 

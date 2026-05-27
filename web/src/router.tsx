@@ -10,7 +10,11 @@ import { ServersListPage } from './pages/servers/ServersListPage'
 import { UsersListPage } from './pages/users/UsersListPage'
 import { RolesListPage } from './pages/roles/RolesListPage'
 import { LogsListPage } from './pages/logs/LogsListPage'
+import { MetricsPage } from './pages/metrics/MetricsPage'
+import { IdpListPage } from './pages/idp/IdpListPage'
+import { JwksListPage } from './pages/jwks/JwksListPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
+import { LocalLoginPage } from './pages/login/LocalLoginPage'
 
 const rootRoute = createRootRoute({ component: Outlet })
 
@@ -50,10 +54,34 @@ const logsRoute = createRoute({
   component: LogsListPage,
 })
 
+const metricsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/console/metrics',
+  component: MetricsPage,
+})
+
+const idpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/console/idp',
+  component: IdpListPage,
+})
+
+const jwksRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/console/jwks',
+  component: JwksListPage,
+})
+
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/console/settings',
   component: SettingsPage,
+})
+
+const localLoginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/auth/local/login',
+  component: LocalLoginPage,
 })
 
 const routeTree = rootRoute.addChildren([
@@ -63,7 +91,11 @@ const routeTree = rootRoute.addChildren([
   usersRoute,
   rolesRoute,
   logsRoute,
+  metricsRoute,
+  idpRoute,
+  jwksRoute,
   settingsRoute,
+  localLoginRoute,
 ])
 
 export const router = createRouter({ routeTree })

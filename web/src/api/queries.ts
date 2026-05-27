@@ -2,10 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, toQS } from './client'
 import type {
   AuditLogEntry,
+  JWKSConfig,
   MCPServer,
   MetricsSummary,
   Policy,
   Role,
+  SAMLIdP,
   ServerTestResult,
   Settings,
   User,
@@ -189,6 +191,68 @@ export const useMetricsTimeseries = (window: string = '1h', bucket: string = '5m
       ),
     refetchInterval: 30_000,
   })
+
+// ---- SAML IdP configs -------------------------------------------------------
+
+export const useIdPs = () =>
+  useQuery({ queryKey: ['idps'], queryFn: () => apiFetch<SAMLIdP[]>('/idps') })
+
+export const useCreateIdP = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: Partial<SAMLIdP>) =>
+      apiFetch<SAMLIdP>('/idps', { method: 'POST', body: JSON.stringify(data) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['idps'] }),
+  })
+}
+
+export const useUpdateIdP = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...data }: Partial<SAMLIdP> & { id: string }) =>
+      apiFetch<SAMLIdP>(`/idps/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['idps'] }),
+  })
+}
+
+export const useDeleteIdP = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/idps/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['idps'] }),
+  })
+}
+
+// ---- JWKS configs -----------------------------------------------------------
+
+export const useJWKSConfigs = () =>
+  useQuery({ queryKey: ['jwks'], queryFn: () => apiFetch<JWKSConfig[]>('/jwks/configs') })
+
+export const useCreateJWKSConfig = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: Partial<JWKSConfig>) =>
+      apiFetch<JWKSConfig>('/jwks/configs', { method: 'POST', body: JSON.stringify(data) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['jwks'] }),
+  })
+}
+
+export const useUpdateJWKSConfig = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...data }: Partial<JWKSConfig> & { id: string }) =>
+      apiFetch<JWKSConfig>(`/jwks/configs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['jwks'] }),
+  })
+}
+
+export const useDeleteJWKSConfig = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/jwks/configs/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['jwks'] }),
+  })
+}
 
 // ---- Settings ---------------------------------------------------------------
 

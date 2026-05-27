@@ -31,6 +31,10 @@ func (m *mockLimiter) Allow(_ context.Context, _ string, _ store.RateLimit) (sto
 	return m.result, m.err
 }
 
+func (m *mockLimiter) StartConcurrent(_ context.Context, _ string, _ int) (bool, func(), error) {
+	return false, func() {}, nil
+}
+
 // withIdentity injects a UserIdentity into the request context.
 func withIdentity(r *http.Request) *http.Request {
 	id := auth.UserIdentity{
@@ -49,7 +53,7 @@ func enabledCfg(rpm int) config.RateLimitingConfig {
 }
 
 func TestMiddleware_Disabled_PassesThrough(t *testing.T) {
-	mw := ratelimit.Middleware(nil, config.RateLimitingConfig{Enabled: false}, nil, slog.Default())
+	mw := ratelimit.Middleware(nil, nil, config.RateLimitingConfig{Enabled: false}, nil, slog.Default())
 	called := false
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		called = true
@@ -64,7 +68,7 @@ func TestMiddleware_Disabled_PassesThrough(t *testing.T) {
 
 func TestMiddleware_Allow_CallsNext(t *testing.T) {
 	lim := &mockLimiter{result: store.RateLimitResult{Allowed: true}}
-	mw := ratelimit.Middleware(lim, enabledCfg(10), nil, slog.Default())
+	mw := ratelimit.Middleware(lim, nil, enabledCfg(10), nil, slog.Default())
 	called := false
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		called = true
@@ -82,7 +86,7 @@ func TestMiddleware_Denied_Returns429(t *testing.T) {
 		Allowed:    false,
 		RetryAfter: 30 * time.Second,
 	}}
-	mw := ratelimit.Middleware(lim, enabledCfg(5), nil, slog.Default())
+	mw := ratelimit.Middleware(lim, nil, enabledCfg(5), nil, slog.Default())
 	called := false
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		called = true
@@ -104,7 +108,7 @@ func TestMiddleware_Denied_Returns429(t *testing.T) {
 
 func TestMiddleware_Denied_JSONRPCErrorBody(t *testing.T) {
 	lim := &mockLimiter{result: store.RateLimitResult{Allowed: false, RetryAfter: 5 * time.Second}}
-	mw := ratelimit.Middleware(lim, enabledCfg(1), nil, slog.Default())
+	mw := ratelimit.Middleware(lim, nil, enabledCfg(1), nil, slog.Default())
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 
 	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", http.NoBody))
@@ -132,7 +136,7 @@ func TestMiddleware_Denied_JSONRPCErrorBody(t *testing.T) {
 
 func TestMiddleware_LimiterError_FailOpen(t *testing.T) {
 	lim := &mockLimiter{err: errors.New("redis down")}
-	mw := ratelimit.Middleware(lim, enabledCfg(5), nil, slog.Default())
+	mw := ratelimit.Middleware(lim, nil, enabledCfg(5), nil, slog.Default())
 	called := false
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		called = true
@@ -148,7 +152,7 @@ func TestMiddleware_LimiterError_FailOpen(t *testing.T) {
 func TestMiddleware_Denied_IncreasesMetric(t *testing.T) {
 	lim := &mockLimiter{result: store.RateLimitResult{Allowed: false, RetryAfter: time.Second}}
 	col := metrics.NewCollector()
-	mw := ratelimit.Middleware(lim, enabledCfg(1), col, slog.Default())
+	mw := ratelimit.Middleware(lim, nil, enabledCfg(1), col, slog.Default())
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 
 	r := withIdentity(httptest.NewRequest(http.MethodPost, "/mcp/srv/message", http.NoBody))

@@ -20,8 +20,11 @@ import (
 //
 // When cfg.Enabled is false the middleware is a pass-through.
 // When the limiter returns an error, the request is allowed through (fail-open).
+// When overrides is non-nil, per-role overrides are fetched and the most-permissive
+// (highest RPM, highest RPD) wins; a zero value means "use global default".
 func Middleware(
 	limiter store.RateLimiter,
+	overrides store.RateLimitOverrideStore,
 	cfg config.RateLimitingConfig,
 	col *metrics.Collector,
 	logger *slog.Logger,
@@ -41,6 +44,29 @@ func Middleware(
 				RPD: cfg.Default.RPD,
 			}
 
+			// Apply most-permissive per-role override (fail-open on lookup errors).
+			if overrides != nil && len(identity.Roles) > 0 {
+				bestRPM, bestRPD := 0, 0
+				for _, role := range identity.Roles {
+					entry, err := overrides.GetByRole(r.Context(), role)
+					if err != nil {
+						continue // ErrNotFound or transient error — skip
+					}
+					if entry.RPM > bestRPM {
+						bestRPM = entry.RPM
+					}
+					if entry.RPD > bestRPD {
+						bestRPD = entry.RPD
+					}
+				}
+				if bestRPM > 0 {
+					limit.RPM = bestRPM
+				}
+				if bestRPD > 0 {
+					limit.RPD = bestRPD
+				}
+			}
+
 			result, err := limiter.Allow(r.Context(), userKey, limit)
 			if err != nil {
 				logger.Warn("rate limiter error (fail open)", "user", userKey, "err", err)
@@ -58,6 +84,22 @@ func Middleware(
 				}
 				writeRateLimitError(w, r, result.RetryAfter)
 				return
+			}
+
+			if cfg.Default.ConcurrentConnections > 0 {
+				overLimit, cleanup, cerr := limiter.StartConcurrent(r.Context(), userKey, cfg.Default.ConcurrentConnections)
+				if cerr != nil {
+					logger.Warn("concurrent limiter error (fail open)", "user", userKey, "err", cerr)
+				} else {
+					defer cleanup()
+					if overLimit {
+						if col != nil {
+							col.RateLimitHits.WithLabelValues("concurrent").Inc()
+						}
+						writeRateLimitError(w, r, 0)
+						return
+					}
+				}
 			}
 
 			next.ServeHTTP(w, r)

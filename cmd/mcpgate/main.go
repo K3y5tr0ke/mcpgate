@@ -2,14 +2,20 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"runtime/debug"
 
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
 	"github.com/K3y5tr0ke/mcpgate/internal/logging"
 	"github.com/K3y5tr0ke/mcpgate/internal/server"
+	"github.com/K3y5tr0ke/mcpgate/internal/store"
 	pgstore "github.com/K3y5tr0ke/mcpgate/internal/store/postgres"
 	redistore "github.com/K3y5tr0ke/mcpgate/internal/store/redis"
 )
@@ -106,15 +112,96 @@ func cmdMigrate(args []string) error {
 
 func cmdSeed(args []string) error {
 	fs := flag.NewFlagSet("seed", flag.ContinueOnError)
-	_ = fs.String("config", "configs/mcpgate.dev.yaml", "path to config file")
+	cfgFile := fs.String("config", "configs/mcpgate.dev.yaml", "path to config file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	// Default roles (admin, developer, readonly) are seeded by migration 003_rbac_seed.
-	// Local admin account creation is implemented in Sprint 8 (Track E).
-	fmt.Println("Default roles are seeded by database migrations (make migrate-up).")
-	fmt.Println("Local admin account creation: coming in Sprint 8.")
+
+	cfg, err := config.Load(*cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	logger := logging.New(cfg.Logging.Level, cfg.Logging.Format)
+	ctx := logging.WithLogger(context.Background(), logger)
+
+	db, err := pgstore.NewPool(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer db.Close()
+
+	userStore := pgstore.NewUserStore(db)
+	roleStore := pgstore.NewRoleStore(db)
+
+	const adminEmail = "admin@localhost"
+
+	password, err := generatePassword(20)
+	if err != nil {
+		return fmt.Errorf("generate password: %w", err)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+
+	user, err := userStore.GetByEmail(ctx, adminEmail)
+	if errors.Is(err, store.ErrNotFound) {
+		user = &store.User{
+			ID:          uuid.New(),
+			Email:       adminEmail,
+			DisplayName: "Local Admin",
+			IDPSubject:  "local-admin",
+			IDPName:     "local",
+			Status:      "active",
+			Metadata:    map[string]any{},
+		}
+		if err := userStore.Create(ctx, user); err != nil {
+			return fmt.Errorf("create admin user: %w", err)
+		}
+		fmt.Println("Created local admin user:", adminEmail)
+	} else if err != nil {
+		return fmt.Errorf("lookup admin user: %w", err)
+	} else {
+		fmt.Println("Resetting password for existing local admin:", adminEmail)
+	}
+
+	if err := userStore.SetPasswordHash(ctx, user.ID, string(hash)); err != nil {
+		return fmt.Errorf("set password hash: %w", err)
+	}
+
+	adminRole, err := roleStore.GetByName(ctx, "admin")
+	if err != nil {
+		return fmt.Errorf("lookup admin role (run make migrate-up first): %w", err)
+	}
+	if err := roleStore.AssignToUser(ctx, user.ID, adminRole.ID, user.ID); err != nil {
+		return fmt.Errorf("assign admin role: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("  Local admin credentials")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Printf("  Email:    %s\n", adminEmail)
+	fmt.Printf("  Password: %s\n", password)
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("  Store this password — it is not recoverable.")
+	fmt.Println("  Run 'make seed' again to reset it.")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	return nil
+}
+
+// generatePassword returns a random alphanumeric string of the given length.
+func generatePassword(length int) (string, error) {
+	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	for i, v := range b {
+		b[i] = chars[int(v)%len(chars)]
+	}
+	return string(b), nil
 }
 
 func printUsage() {

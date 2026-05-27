@@ -27,25 +27,56 @@ interface ServerFormState {
   name: string
   description: string
   transport: MCPServer['transport']
-  config: string
   is_enabled: boolean
+  // streamable_http
+  endpoint: string
+  // sse
+  sseEndpoint: string
+  messageEndpoint: string
+  // stdio
+  command: string
+  args: string // space-separated
 }
 
 const defaultForm = (): ServerFormState => ({
   name: '',
   description: '',
   transport: 'streamable_http',
-  config: '{}',
   is_enabled: true,
+  endpoint: '',
+  sseEndpoint: '',
+  messageEndpoint: '',
+  command: '',
+  args: '',
 })
 
 function serverToForm(s: MCPServer): ServerFormState {
+  const cfg = s.config ?? {}
   return {
     name: s.name,
     description: s.description,
     transport: s.transport,
-    config: JSON.stringify(s.config, null, 2),
     is_enabled: s.is_enabled,
+    endpoint: (cfg['endpoint'] as string) || (cfg['url'] as string) || '',
+    sseEndpoint: (cfg['sse_endpoint'] as string) || '',
+    messageEndpoint: (cfg['message_endpoint'] as string) || '',
+    command: (cfg['command'] as string) || '',
+    args: Array.isArray(cfg['args']) ? (cfg['args'] as string[]).join(' ') : '',
+  }
+}
+
+function formToConfig(f: ServerFormState): Record<string, unknown> {
+  switch (f.transport) {
+    case 'streamable_http':
+      return { endpoint: f.endpoint.trim() }
+    case 'sse':
+      return { sse_endpoint: f.sseEndpoint.trim(), message_endpoint: f.messageEndpoint.trim() }
+    case 'stdio': {
+      const args = f.args.trim() ? f.args.trim().split(/\s+/) : []
+      return { command: f.command.trim(), ...(args.length ? { args } : {}) }
+    }
+    default:
+      return {}
   }
 }
 
@@ -78,20 +109,13 @@ export function ServersListPage() {
     setModalOpen(true)
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    let config: Record<string, unknown>
-    try {
-      config = JSON.parse(form.config)
-    } catch {
-      setFormError('Config must be valid JSON')
-      return
-    }
     const payload = {
       name: form.name,
       description: form.description,
       transport: form.transport,
-      config,
+      config: formToConfig(form),
       is_enabled: form.is_enabled,
     }
     try {
@@ -212,14 +236,50 @@ export function ServersListPage() {
               setForm((f) => ({ ...f, transport: e.target.value as MCPServer['transport'] }))
             }
           />
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Config (JSON)</label>
-            <textarea
-              className="h-28 rounded-md border border-gray-300 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              value={form.config}
-              onChange={(e) => setForm((f) => ({ ...f, config: e.target.value }))}
+          {form.transport === 'streamable_http' && (
+            <Input
+              label="Endpoint URL"
+              placeholder="https://my-mcp-server/mcp"
+              value={form.endpoint}
+              onChange={(e) => setForm((f) => ({ ...f, endpoint: e.target.value }))}
+              required
             />
-          </div>
+          )}
+          {form.transport === 'sse' && (
+            <>
+              <Input
+                label="SSE Endpoint"
+                placeholder="https://my-mcp-server/sse"
+                value={form.sseEndpoint}
+                onChange={(e) => setForm((f) => ({ ...f, sseEndpoint: e.target.value }))}
+                required
+              />
+              <Input
+                label="Message Endpoint"
+                placeholder="https://my-mcp-server/message"
+                value={form.messageEndpoint}
+                onChange={(e) => setForm((f) => ({ ...f, messageEndpoint: e.target.value }))}
+                required
+              />
+            </>
+          )}
+          {form.transport === 'stdio' && (
+            <>
+              <Input
+                label="Command"
+                placeholder="npx"
+                value={form.command}
+                onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
+                required
+              />
+              <Input
+                label="Arguments (space-separated)"
+                placeholder="-y @modelcontextprotocol/server-filesystem /tmp"
+                value={form.args}
+                onChange={(e) => setForm((f) => ({ ...f, args: e.target.value }))}
+              />
+            </>
+          )}
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input
               type="checkbox"
