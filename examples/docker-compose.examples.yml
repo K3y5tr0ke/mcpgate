@@ -1,0 +1,57 @@
+name: mcpgate-examples
+
+# Overlay this file on top of docker-compose.dev.yml to add the example MCP servers:
+#
+#   docker compose \
+#     -f deployments/docker/docker-compose.dev.yml \
+#     -f examples/docker-compose.examples.yml \
+#     up -d
+#
+# Or use the Makefile shorthand:
+#
+#   make docker-up-examples
+
+services:
+  mcp-streamable:
+    build:
+      # Build context is the repo root so the common/ package is reachable.
+      context: ..
+      dockerfile: examples/mcp-servers/streamable-http/Dockerfile
+    environment:
+      MCP_SERVER_NAME: streamable-http
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    healthcheck:
+      test: >
+        wget -qO- --post-data='{"jsonrpc":"2.0","id":1,"method":"ping"}'
+        --header='Content-Type: application/json'
+        http://localhost:8081/mcp || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  mcp-sse:
+    build:
+      context: ..
+      dockerfile: examples/mcp-servers/sse/Dockerfile
+    environment:
+      MCP_SERVER_NAME: sse
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+    healthcheck:
+      test: >
+        wget -qO- --post-data='{"jsonrpc":"2.0","id":1,"method":"ping"}'
+        --header='Content-Type: application/json'
+        http://localhost:8082/message | grep -q '"result"' || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+# Join the same network as docker-compose.dev.yml so mcpgate can reach these
+# services by hostname when it is also containerised.
+networks:
+  default:
+    name: mcpgate-net
+    external: true

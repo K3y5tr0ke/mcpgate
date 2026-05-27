@@ -12,6 +12,66 @@ MCP Clients  →  mcpgate (auth · RBAC · logging · metrics)  →  Upstream MC
 
 ---
 
+## How it works
+
+mcpgate is a **front door** between users (or AI agents) and all upstream MCP servers. Users speak only to mcpgate; mcpgate checks their identity and permissions, then forwards the request to the right server. Upstream servers are never exposed directly.
+
+### Server registration
+
+An admin registers an upstream MCP server via the admin console or REST API, supplying its name, transport type, and connection details. The server name becomes the routing key in every URL:
+
+```
+POST /mcp/github-tools/message   →  forwards to the "github-tools" upstream
+POST /mcp/jira-tools/message     →  forwards to the "jira-tools" upstream
+```
+
+Registration is configuration only — mcpgate does not connect to the server, send `initialize`, or fetch its tool list at registration time. The first real request from a client triggers the connection.
+
+### Request journey
+
+Every request through the proxy passes through a fixed middleware chain before reaching the upstream:
+
+```
+Client request
+  │
+  ├─ 1. Auth        — validate JWT (SAML session or M2M JWKS); extract identity + roles
+  ├─ 2. Logging     — pre-parse JSON-RPC body; start audit log entry
+  ├─ 3. Metrics     — increment Redis request counters (global + per-server)
+  ├─ 4. Rate limit  — check RPM / RPD / concurrent connection limits per user
+  ├─ 5. RBAC        — map MCP method → action category; check Casbin policy
+  └─ 6. Proxy       — forward raw bytes to upstream; return raw response verbatim
+```
+
+### Action categories and RBAC
+
+mcpgate maps MCP JSON-RPC methods to action categories for access-control decisions:
+
+| Category  | MCP methods |
+|-----------|-------------|
+| `list`    | `tools/list`, `resources/list`, `prompts/list` |
+| `call`    | `tools/call` |
+| `read`    | `resources/read`, `resources/subscribe`, `prompts/get` |
+| `write`   | `resources/write` |
+| `connect` | `initialize`, `ping`, SSE stream open |
+
+Casbin policies are stored as `(role, server, action)` tuples. Wildcards are supported:
+
+```
+(developer, *,            call)  →  developer can call tools on any server
+(developer, github-tools, list)  →  developer can list tools on github-tools only
+(admin,     *,            *)     →  admin can do anything on any server
+```
+
+Registering a new server does **not** create any Casbin policy. Whether a role can reach a new server depends entirely on whether an existing wildcard rule covers it.
+
+### Transparent forwarding
+
+mcpgate never modifies MCP message payloads. The raw JSON-RPC bytes from the client are forwarded unchanged to the upstream; the raw bytes from the upstream are returned unchanged to the client. The specific tool name inside a `tools/call` body is not parsed for routing — it is passed through verbatim and captured in the audit log.
+
+For a detailed walkthrough of each step, the Casbin policy model, and the action category mapping, see [`docs/understanding.md`](docs/understanding.md).
+
+---
+
 ## Requirements
 
 | Tool | Version | Purpose |
@@ -88,6 +148,97 @@ Open the admin console: http://localhost:8080/console
 
 ---
 
+## Developer workflows
+
+Step-by-step sequences for the most common tasks. Run these from the repo root.
+
+### First-time setup (run once after cloning)
+
+```bash
+# 1. Install the pre-push git hook (runs make ci-fast before every push)
+make install-hooks
+
+# 2. Start Postgres + Redis, apply migrations, seed DB + Auth0 IdP, start everything
+make setup-dev
+# → backend on :8080, frontend dev server on :5173
+```
+
+### Daily development (subsequent runs)
+
+```bash
+# Start Docker services (Postgres + Redis) if not already running
+make docker-up
+
+# Start backend + frontend together
+make dev-all
+
+# Or start them separately:
+make dev           # backend on :8080
+make dev-frontend  # frontend on :5173 (separate terminal)
+```
+
+### Unit tests (no external services required)
+
+```bash
+make test-unit
+# Runs in ~seconds. Safe to run any time, no Docker needed.
+```
+
+### Integration tests (requires Postgres + Redis)
+
+```bash
+# 1. Start services and wait until healthy
+make ci-services
+
+# 2. Apply migrations (idempotent — safe to re-run)
+make migrate-up
+
+# 3. Run integration tests
+make test-integration
+```
+
+### Full local CI pipeline (mirrors CI)
+
+```bash
+make ci
+# Runs: lint → unit tests → start services → migrate → integration tests → build → security scan
+# Use this before opening a PR.
+```
+
+### Fast pre-push check (no Docker)
+
+```bash
+make ci-fast
+# Runs: lint → unit tests → build (~30 s)
+# The pre-push hook runs this automatically on every git push (after make install-hooks).
+```
+
+### Running the example MCP servers
+
+The repo includes three example MCP servers (one per transport) for integration testing and local development.
+
+```bash
+# 1. Build the stdio binary (required for stdio registration)
+make build-examples
+# → bin/mcp-streamable-example, bin/mcp-sse-example, bin/mcp-stdio-example
+
+# 2. Start the two containerised example servers (Streamable HTTP + SSE)
+make docker-up-examples
+# Adds mcp-streamable (:8081) and mcp-sse (:8082) to the running dev stack.
+
+# 3. Register all three servers in mcpgate via the admin API
+#    Requires a running mcpgate instance and a valid admin JWT.
+TOKEN=$(curl -s -X POST http://localhost:8080/auth/local/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@mcpgate.local","password":"<password>"}' | jq -r .token)
+
+MCPGATE_TOKEN=$TOKEN make seed-examples
+```
+
+See [`examples/seed-example-servers.sh`](examples/seed-example-servers.sh) for `--upstream-host` options when mcpgate itself runs in a container.
+
+---
+
 ## What's implemented
 
 ### Sprint 0 — Foundation
@@ -98,7 +249,7 @@ Open the admin console: http://localhost:8080/console
 - `chi` HTTP server with `/health` and `/ready` endpoints, graceful shutdown
 - SQL migrations (`golang-migrate`) under `internal/store/postgres/migrations/`
 - Docker Compose dev stack (`deployments/docker/docker-compose.dev.yml`)
-- GitHub Actions CI pipeline
+- CI pipeline (lint → unit → integration → build)
 - `scripts/setup.sh` — one-shot dev environment bootstrap
 
 ### Sprint 1 — Core Proxy Engine
@@ -173,6 +324,7 @@ The `.env` file is gitignored and holds local dev credentials only.
 | `make build` | Build web assets then compile binary to `bin/mcpgate` |
 | `make build-web` | Build React admin console to `web/dist/` |
 | `make build-docker` | Build production Docker image |
+| `make build-examples` | Build example MCP server binaries to `bin/` (required for stdio) |
 | `make clean` | Remove `bin/`, `web/dist/`, coverage artifacts |
 
 ### Database
@@ -213,9 +365,12 @@ The `.env` file is gitignored and holds local dev credentials only.
 
 | Target | Description |
 |--------|-------------|
-| `make install-hooks` | Install the pre-push git hook (`scripts/pre-push.hook → .git/hooks/pre-push`) |
+| `make install-hooks` | Install the pre-push git hook (`scripts/pre-push.hook → .git/hooks/pre-push`) — run once after cloning |
 | `make docker-up` | Start all Docker services (Postgres, Redis, Prometheus, Grafana) |
 | `make docker-down` | Stop and remove all Docker services (destroys volumes) |
+| `make docker-up-examples` | Start dev stack + containerised example MCP servers (Streamable HTTP + SSE) |
+| `make seed-examples` | Register example MCP servers via admin API (requires `MCPGATE_TOKEN`) |
+| `make stop` | Kill the running mcpgate server (ports 8080 + 9090) |
 | `make help` | Print all targets with descriptions |
 
 ---

@@ -1,0 +1,29 @@
+# Version control
+.git/
+.gitignore
+
+# Frontend build artefacts and dependencies
+web/node_modules/
+web/dist/
+
+# Compiled binaries
+bin/
+
+# Test and coverage artefacts
+coverage.out
+coverage.html
+
+# Local secrets and credentials
+.env
+certs/
+*.pem
+*.key
+*.crt
+
+# IDE and OS files
+.vscode/
+.idea/
+*.DS_Store
+
+# Go test cache and build cache (not needed in Docker)
+.cache/

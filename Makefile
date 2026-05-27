@@ -9,13 +9,13 @@ DATABASE_URL ?= postgres://mcpgate:devpassword@localhost:5432/mcpgate?sslmode=di
 MIGRATIONS  := internal/store/postgres/migrations
 BIN         := bin/mcpgate
 
-.PHONY: build build-web build-docker dev dev-frontend \
+.PHONY: build build-web build-docker build-examples dev dev-frontend \
         test-unit test-integration test-coverage \
         lint lint-fix security-scan \
         migrate-up migrate-down migrate-create \
-        docker-up docker-down \
+        docker-up docker-down docker-up-examples \
         ci ci-fast ci-services \
-        seed seed-idp setup-dev stop clean install-hooks help
+        seed seed-idp seed-examples setup-dev stop clean install-hooks help
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -27,6 +27,13 @@ build: build-web
 
 build-docker:
 	docker build -t mcpgate:dev -f deployments/docker/Dockerfile .
+
+# Build the three example MCP server binaries into bin/.
+# Required before running seed-examples for the stdio server.
+build-examples:
+	CGO_ENABLED=0 $(GVM_GO) build -o bin/mcp-streamable-example ./examples/mcp-servers/streamable-http
+	CGO_ENABLED=0 $(GVM_GO) build -o bin/mcp-sse-example        ./examples/mcp-servers/sse
+	CGO_ENABLED=0 $(GVM_GO) build -o bin/mcp-stdio-example      ./examples/mcp-servers/stdio
 
 # ── Development ───────────────────────────────────────────────────────────────
 
@@ -86,6 +93,13 @@ docker-up:
 docker-down:
 	docker compose -f deployments/docker/docker-compose.dev.yml down -v
 
+# Start the dev stack plus the two containerised example MCP servers.
+docker-up-examples:
+	docker compose \
+	  -f deployments/docker/docker-compose.dev.yml \
+	  -f examples/docker-compose.examples.yml \
+	  up -d
+
 # ── Seed ─────────────────────────────────────────────────────────────────────
 
 seed:
@@ -95,6 +109,19 @@ seed:
 # Idempotent — safe to run multiple times.
 seed-idp:
 	psql "$(DATABASE_URL)" -f scripts/seed_auth0_idp.sql
+
+# Register the three example MCP servers via the admin REST API.
+# Requires MCPGATE_TOKEN (a valid admin JWT) and a running mcpgate instance.
+# Run 'make build-examples' first so the stdio binary is available.
+seed-examples:
+	@if [ -z "$(MCPGATE_TOKEN)" ]; then \
+	  echo "MCPGATE_TOKEN is required."; \
+	  echo "Get one with: curl -s -X POST http://localhost:8080/auth/local/login \\"; \
+	  echo "  -H 'Content-Type: application/json' \\"; \
+	  echo "  -d '{\"email\":\"admin@mcpgate.local\",\"password\":\"<password>\"}' | jq -r .token"; \
+	  exit 1; \
+	fi
+	MCPGATE_TOKEN=$(MCPGATE_TOKEN) bash examples/seed-example-servers.sh
 
 # Full first-time dev environment setup.
 # Starts services, applies migrations, seeds DB + IdP, then starts servers.
@@ -145,6 +172,7 @@ help:
 	@echo "  build              Build web assets then compile binary to $(BIN)"
 	@echo "  build-web          Build the React admin console (web/dist/)"
 	@echo "  build-docker       Build production Docker image"
+	@echo "  build-examples     Build example MCP server binaries to bin/"
 	@echo "  dev                Run server with dev config (hot reload: use air if desired)"
 	@echo "  dev-all            Start Docker services + backend + frontend"
 	@echo "  test-unit          Run unit tests (no external services)"
@@ -158,11 +186,13 @@ help:
 	@echo "  migrate-create     Create a new migration (name=<suffix>)"
 	@echo "  docker-up          Start Postgres + Redis via docker compose"
 	@echo "  docker-down        Stop and remove Docker services"
+	@echo "  docker-up-examples Start dev stack + containerised example MCP servers"
 	@echo "  ci-fast            Lint + unit tests + build (no Docker, used by pre-push hook)"
 	@echo "  ci                 Full local CI pipeline (requires Docker)"
 	@echo "  install-hooks      Install git pre-push hook"
 	@echo "  seed               Seed database with default roles and admin user"
 	@echo "  seed-idp           Upsert Auth0 dev SAML IdP config into Postgres"
+	@echo "  seed-examples      Register example MCP servers via admin API (needs MCPGATE_TOKEN)"
 	@echo "  setup-dev          Full first-time setup: services + migrate + seed + seed-idp + start"
 	@echo "  stop               Kill the running mcpgate server (ports 8080 + 9090)"
 	@echo "  clean              Remove build artifacts"
