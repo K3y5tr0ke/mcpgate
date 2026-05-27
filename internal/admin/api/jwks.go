@@ -24,6 +24,9 @@ func (h *jwksHandler) list(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if cfgs == nil {
+		cfgs = []store.JWKSConfig{}
+	}
 	writeJSON(w, http.StatusOK, cfgs)
 }
 

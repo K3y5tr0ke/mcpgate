@@ -24,6 +24,9 @@ func (h *idpHandler) list(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if cfgs == nil {
+		cfgs = []store.SAMLIDPConfig{}
+	}
 	writeJSON(w, http.StatusOK, cfgs)
 }
 
