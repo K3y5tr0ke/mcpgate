@@ -4,6 +4,7 @@ package redis_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,11 @@ import (
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 	redisstore "github.com/K3y5tr0ke/mcpgate/internal/store/redis"
 )
+
+// testRunID is computed once per test binary execution so that rate-limit keys
+// from a previous run (which may still be alive in Redis within their 60s RPM
+// window) never collide with the current run's keys.
+var testRunID = fmt.Sprintf("%d", time.Now().UnixNano())
 
 func newTestRateLimiter(t *testing.T) *redisstore.RateLimiter {
 	t.Helper()
@@ -23,10 +29,10 @@ func newTestRateLimiter(t *testing.T) *redisstore.RateLimiter {
 	return rl
 }
 
-// uniqueKey returns a key that won't collide with other test runs.
+// uniqueKey returns a key scoped to this test and this binary invocation.
 func uniqueKey(t *testing.T) string {
 	t.Helper()
-	return "test:" + t.Name() + ":" + t.Name()
+	return fmt.Sprintf("test:%s:%s", t.Name(), testRunID)
 }
 
 func TestRateLimiter_UnderLimit_Allowed(t *testing.T) {

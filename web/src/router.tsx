@@ -80,7 +80,7 @@ const settingsRoute = createRoute({
 
 const localLoginRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/auth/local/login',
+  path: '/console/login',
   component: LocalLoginPage,
 })
 
