@@ -158,7 +158,8 @@ Step-by-step sequences for the most common tasks. Run these from the repo root.
 # 1. Install the pre-push git hook (runs make ci-fast before every push)
 make install-hooks
 
-# 2. Start Postgres + Redis, apply migrations, seed DB + Auth0 IdP, start everything
+# 2. Start Postgres + Redis, apply migrations, seed DB + Auth0 IdP,
+#    build web assets (required — go:embed needs web/dist/ to compile), then start everything
 make setup-dev
 # → backend on :8080, frontend dev server on :5173
 ```

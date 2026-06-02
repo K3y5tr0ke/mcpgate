@@ -130,6 +130,7 @@ setup-dev:
 	$(MAKE) migrate-up
 	$(MAKE) seed
 	$(MAKE) seed-idp
+	$(MAKE) build-web
 	$(MAKE) dev &
 	$(MAKE) dev-frontend
 
