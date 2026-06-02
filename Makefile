@@ -126,11 +126,11 @@ seed-examples:
 # Full first-time dev environment setup.
 # Starts services, applies migrations, seeds DB + IdP, then starts servers.
 setup-dev:
+	$(MAKE) build-web
 	docker compose -f deployments/docker/docker-compose.dev.yml up -d --wait postgres redis
 	$(MAKE) migrate-up
 	$(MAKE) seed
 	$(MAKE) seed-idp
-	$(MAKE) build-web
 	$(MAKE) dev &
 	$(MAKE) dev-frontend
 
