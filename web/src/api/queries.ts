@@ -3,8 +3,10 @@ import { apiFetch, toQS } from './client'
 import type {
   AuditLogEntry,
   JWKSConfig,
+  JWKSRotateResult,
   MCPServer,
   MetricsSummary,
+  MetricsTimeseries,
   Policy,
   Role,
   SAMLIdP,
@@ -182,12 +184,15 @@ export const useMetricsSummary = () =>
     refetchInterval: 10_000,
   })
 
-export const useMetricsTimeseries = (window: string = '1h', bucket: string = '5m') =>
+// useMetricsTimeseries fetches request-volume buckets for a window. When `server`
+// is set, the backend returns the per-server series. Bucket size / resolution is
+// server-derived and reported back in the response (window, bucket, resolution_secs).
+export const useMetricsTimeseries = (window: string = '1h', server?: string) =>
   useQuery({
-    queryKey: ['metrics', 'timeseries', window, bucket],
+    queryKey: ['metrics', 'timeseries', window, server ?? ''],
     queryFn: () =>
-      apiFetch<{ buckets: { requests: number }[] }>(
-        `/metrics/timeseries?window=${window}&bucket=${bucket}`,
+      apiFetch<MetricsTimeseries>(
+        `/metrics/timeseries?window=${window}${server ? `&server=${encodeURIComponent(server)}` : ''}`,
       ),
     refetchInterval: 30_000,
   })
@@ -253,6 +258,14 @@ export const useDeleteJWKSConfig = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['jwks'] }),
   })
 }
+
+// useRotateJWKS forces the backend to evict its cached key set for an issuer,
+// re-fetching on the next token validation. Returns the advertised key count.
+export const useRotateJWKS = () =>
+  useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<JWKSRotateResult>(`/jwks/configs/${id}/rotate`, { method: 'POST' }),
+  })
 
 // ---- Settings ---------------------------------------------------------------
 

@@ -7,13 +7,84 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/metrics"
 	"github.com/K3y5tr0ke/mcpgate/internal/proxy"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
+
+// fakeRedis records Incr/Expire calls. It embeds goredis.Cmdable so it satisfies
+// the interface without hand-implementing its ~200 methods; only the methods the
+// metrics middleware actually calls are overridden.
+type fakeRedis struct {
+	goredis.Cmdable
+	incrKeys []string
+}
+
+func (f *fakeRedis) Incr(ctx context.Context, key string) *goredis.IntCmd {
+	f.incrKeys = append(f.incrKeys, key)
+	return goredis.NewIntCmd(ctx)
+}
+
+func (f *fakeRedis) Expire(ctx context.Context, _ string, _ time.Duration) *goredis.BoolCmd {
+	return goredis.NewBoolCmd(ctx)
+}
+
+func hasKeyWithPrefix(keys []string, prefix string) bool {
+	for _, k := range keys {
+		if strings.HasPrefix(k, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCollector_PerServerTimeseriesKey asserts that, with Redis wired, a request
+// carrying a serverName increments both the global and per-server timeseries keys.
+func TestCollector_PerServerTimeseriesKey(t *testing.T) {
+	c := metrics.NewCollector()
+	fr := &fakeRedis{}
+	c.WithRedis(fr)
+
+	handler := c.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	r := chiRequest("github", "/mcp/github/message")
+	handler.ServeHTTP(httptest.NewRecorder(), r)
+
+	if !hasKeyWithPrefix(fr.incrKeys, "metrics:ts:srv:github:") {
+		t.Errorf("expected a per-server key metrics:ts:srv:github:*, got %v", fr.incrKeys)
+	}
+	// The global key must not be confused with the per-server one.
+	if !hasKeyWithPrefix(fr.incrKeys, "metrics:ts:") {
+		t.Errorf("expected a global key metrics:ts:*, got %v", fr.incrKeys)
+	}
+}
+
+// TestCollector_NoServerName_NoPerServerKey asserts that a request without a
+// serverName (empty route param) increments only the global key.
+func TestCollector_NoServerName_NoPerServerKey(t *testing.T) {
+	c := metrics.NewCollector()
+	fr := &fakeRedis{}
+	c.WithRedis(fr)
+
+	handler := c.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	r := chiRequest("", "/mcp//message")
+	handler.ServeHTTP(httptest.NewRecorder(), r)
+
+	if hasKeyWithPrefix(fr.incrKeys, "metrics:ts:srv:") {
+		t.Errorf("expected no per-server key when serverName is empty, got %v", fr.incrKeys)
+	}
+	if !hasKeyWithPrefix(fr.incrKeys, "metrics:ts:") {
+		t.Errorf("expected the global key, got %v", fr.incrKeys)
+	}
+}
 
 // withMessage injects a parsed proxy.Message into the request context,
 // mirroring what logging.Middleware does before metrics are recorded.

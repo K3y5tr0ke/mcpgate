@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { AuditLogEntry } from '../../api/types'
-import { Badge, statusBadge } from '../ui/Badge'
+import { Badge } from '../ui/Badge'
+import { statusBadge } from '../ui/badges'
 import { Button } from '../ui/Button'
 import { format } from 'date-fns'
 

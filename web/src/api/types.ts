@@ -71,6 +71,24 @@ export interface MetricsSummary {
   dropped_audit_logs: number
 }
 
+export interface MetricsBucket {
+  minute: number // unix minute (epoch seconds / 60) of the bucket's start
+  requests: number
+}
+
+export interface MetricsTimeseries {
+  window: string // "1h" | "6h" | "24h" | "7d"
+  bucket: string // e.g. "1m", "15m", "2h"
+  resolution_secs: number
+  buckets: MetricsBucket[]
+}
+
+export interface JWKSRotateResult {
+  issuer: string
+  key_count: number
+  rotated_at: string
+}
+
 export interface ServerTestResult {
   ok: boolean
   tools?: unknown[]

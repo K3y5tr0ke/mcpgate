@@ -164,11 +164,18 @@ func (c *Collector) Middleware() func(http.Handler) http.Handler {
 			defer c.ActiveRequests.WithLabelValues(server).Dec()
 
 			if c.redis != nil {
-				now := time.Now()
-				key := fmt.Sprintf("metrics:ts:%d", now.Unix()/60)
+				minute := time.Now().Unix() / 60
 				ctx := r.Context()
+				key := fmt.Sprintf("metrics:ts:%d", minute)
 				c.redis.Incr(ctx, key)
 				c.redis.Expire(ctx, key, 7*24*time.Hour)
+				// Per-server bucket for the metrics drilldown. Only written when the
+				// request carries a serverName (i.e. inside the /mcp/{serverName} group).
+				if server != "" {
+					srvKey := fmt.Sprintf("metrics:ts:srv:%s:%d", server, minute)
+					c.redis.Incr(ctx, srvKey)
+					c.redis.Expire(ctx, srvKey, 7*24*time.Hour)
+				}
 			}
 
 			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)

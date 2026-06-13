@@ -1,6 +1,7 @@
 import { useMetricsSummary, useMetricsTimeseries, useLogs } from '../../api/queries'
 import { Card } from '../../components/ui/Card'
-import { Badge, circuitStateBadge, statusBadge } from '../../components/ui/Badge'
+import { Badge } from '../../components/ui/Badge'
+import { circuitStateBadge, statusBadge } from '../../components/ui/badges'
 import { SparklineChart } from '../../components/charts/SparklineChart'
 import { AppShell } from '../../components/layout/AppShell'
 import { format } from 'date-fns'

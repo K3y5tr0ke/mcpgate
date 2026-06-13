@@ -9,6 +9,7 @@ import { Modal } from '../../components/ui/Modal'
 import { Input } from '../../components/ui/Input'
 import { Table } from '../../components/ui/Table'
 import type { Column } from '../../components/ui/Table'
+import { IdpWizard } from '../../components/idp/IdpWizard'
 
 interface IdPForm {
   name: string
@@ -46,15 +47,13 @@ export function IdpListPage() {
   const deleteIdP = useDeleteIdP()
 
   const [modalOpen, setModalOpen] = useState(false)
+  const [wizardOpen, setWizardOpen] = useState(false)
   const [editing, setEditing] = useState<SAMLIdP | null>(null)
   const [form, setForm] = useState<IdPForm>(defaultForm())
   const [formError, setFormError] = useState<string | null>(null)
 
   function openCreate() {
-    setEditing(null)
-    setForm(defaultForm())
-    setFormError(null)
-    setModalOpen(true)
+    setWizardOpen(true)
   }
 
   function openEdit(idp: SAMLIdP) {
@@ -136,7 +135,7 @@ export function IdpListPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-900 dark:text-white">SAML Identity Providers</h1>
-          <Button onClick={openCreate}>Add IdP</Button>
+          <Button onClick={openCreate}>Setup IdP</Button>
         </div>
 
         <Card>
@@ -209,6 +208,13 @@ export function IdpListPage() {
           </div>
         </form>
       </Modal>
+
+      <IdpWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onSubmit={(payload) => createIdP.mutateAsync(payload)}
+        submitting={createIdP.isPending}
+      />
     </AppShell>
   )
 }

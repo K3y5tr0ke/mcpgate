@@ -10,7 +10,7 @@ MIGRATIONS  := internal/store/postgres/migrations
 BIN         := bin/mcpgate
 
 .PHONY: build build-web build-docker build-examples dev dev-frontend \
-        test-unit test-integration test-coverage \
+        test-unit test-integration test-frontend test-e2e-playwright test-coverage \
         lint lint-fix security-scan \
         migrate-up migrate-down migrate-create \
         docker-up docker-down docker-up-examples \
@@ -56,6 +56,16 @@ test-unit:
 
 test-integration:
 	$(GVM_GO) test -race -count=1 -tags=integration ./internal/...
+
+# Frontend lint (ESLint) + unit/component tests (Vitest, jsdom). Fast, no Docker —
+# runs in ci-fast.
+test-frontend:
+	$(NVM) cd web && npm run lint && npm run test
+
+# Playwright E2E — needs a running stack (server + Postgres + Redis). NOT in
+# ci-fast; invoked by the ci pipeline / a dedicated CI job against docker-compose.
+test-e2e-playwright:
+	$(NVM) cd web && npx playwright test --project=chromium
 
 test-coverage:
 	$(GVM_GO) test -race -coverprofile=coverage.out -covermode=atomic ./internal/...
@@ -136,9 +146,9 @@ setup-dev:
 
 # ── Local CI ──────────────────────────────────────────────────────────────────
 
-# Fast check: lint + unit tests + build — no Docker needed (~30s).
+# Fast check: lint + Go unit + frontend unit + build — no Docker needed (~30s).
 # Run by the pre-push git hook on every push.
-ci-fast: lint test-unit build
+ci-fast: lint test-unit test-frontend build
 
 # Start only the CI services (Postgres + Redis) and wait until healthy.
 ci-services:
@@ -146,7 +156,10 @@ ci-services:
 
 # Full local CI pipeline — mirrors the removed .github/workflows/ci.yml.
 # Run this before opening a PR or merging to main.
-ci: lint test-unit ci-services migrate-up test-integration build security-scan
+# Playwright E2E (test-e2e-playwright) is NOT included here: it needs a running
+# server + seeded admin, which a dedicated CI job provisions (docker-compose up →
+# migrate-up → seed → serve & → health-wait → make test-e2e-playwright).
+ci: lint test-unit test-frontend ci-services migrate-up test-integration build security-scan
 	@echo ""
 	@echo "All CI checks passed."
 

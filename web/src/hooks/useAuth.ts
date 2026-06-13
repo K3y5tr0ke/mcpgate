@@ -22,13 +22,15 @@ function decodeJWT(token: string): JWTPayload | null {
 export function useAuth() {
   const token = localStorage.getItem('mcpgate_token')
   const payload = useMemo(() => (token ? decodeJWT(token) : null), [token])
-  const isExpired = payload ? payload.exp * 1000 < Date.now() : true
-  const isAuthenticated = !!token && !isExpired
 
   const logout = useCallback(() => {
     localStorage.removeItem('mcpgate_token')
     window.location.href = '/auth/saml/logout'
   }, [])
+
+  // Expiry is enforced server-side (the API returns 401 → client redirects to
+  // login); the UI does not gate rendering on a client-side clock check.
+  const isAuthenticated = !!payload
 
   return { isAuthenticated, payload, token, logout }
 }

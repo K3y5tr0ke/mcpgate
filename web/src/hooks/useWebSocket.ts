@@ -10,6 +10,9 @@ export function useWebSocket({ url, enabled = true, onMessage }: UseWebSocketOpt
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Holds the latest connect() so the reconnect timer can call it without the
+  // callback referencing itself before it is declared.
+  const connectRef = useRef<() => void>(() => {})
 
   const connect = useCallback(() => {
     if (!enabled) return
@@ -32,7 +35,7 @@ export function useWebSocket({ url, enabled = true, onMessage }: UseWebSocketOpt
     ws.onclose = () => {
       setConnected(false)
       if (enabled) {
-        reconnectTimer.current = setTimeout(connect, 3000)
+        reconnectTimer.current = setTimeout(() => connectRef.current(), 3000)
       }
     }
 
@@ -40,6 +43,7 @@ export function useWebSocket({ url, enabled = true, onMessage }: UseWebSocketOpt
   }, [url, enabled, onMessage])
 
   useEffect(() => {
+    connectRef.current = connect
     connect()
     return () => {
       wsRef.current?.close()
