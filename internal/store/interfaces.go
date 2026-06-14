@@ -168,27 +168,27 @@ type ServerTool struct {
 }
 
 type AuditLogEntry struct {
-	ID           int64          `db:"id"`
-	Timestamp    time.Time      `db:"timestamp"`
-	TraceID      string         `db:"trace_id"`
-	SessionID    uuid.UUID      `db:"session_id"`
-	UserID       uuid.UUID      `db:"user_id"`
-	UserEmail    string         `db:"user_email"`
-	ClientIP     string         `db:"client_ip"`
-	ServerID     uuid.UUID      `db:"server_id"`
-	ServerName   string         `db:"server_name"`
-	MCPMethod    string         `db:"mcp_method"`
-	ToolName     string         `db:"tool_name"`
-	Direction    string         `db:"direction"` // request, response, notification
-	Status       string         `db:"status"`    // success, error, denied
-	ErrorCode    *int           `db:"error_code"`
-	ErrorMessage *string        `db:"error_message"`
-	LatencyMS    int            `db:"latency_ms"`
-	RequestSize  int            `db:"request_size"`
-	ResponseSize int            `db:"response_size"`
-	RBACDecision string         `db:"rbac_decision"`
-	Metadata     map[string]any `db:"metadata"`
-	HashChain    string         `db:"hash_chain"`
+	ID           int64          `db:"id" json:"id"`
+	Timestamp    time.Time      `db:"timestamp" json:"timestamp"`
+	TraceID      string         `db:"trace_id" json:"trace_id"`
+	SessionID    uuid.UUID      `db:"session_id" json:"session_id"`
+	UserID       uuid.UUID      `db:"user_id" json:"user_id"`
+	UserEmail    string         `db:"user_email" json:"user_email"`
+	ClientIP     string         `db:"client_ip" json:"client_ip"`
+	ServerID     uuid.UUID      `db:"server_id" json:"server_id"`
+	ServerName   string         `db:"server_name" json:"server_name"`
+	MCPMethod    string         `db:"mcp_method" json:"mcp_method"`
+	ToolName     string         `db:"tool_name" json:"tool_name"`
+	Direction    string         `db:"direction" json:"direction"` // request, response, notification
+	Status       string         `db:"status" json:"status"`       // success, error, denied
+	ErrorCode    *int           `db:"error_code" json:"error_code"`
+	ErrorMessage *string        `db:"error_message" json:"error_message"`
+	LatencyMS    int            `db:"latency_ms" json:"latency_ms"`
+	RequestSize  int            `db:"request_size" json:"request_size"`
+	ResponseSize int            `db:"response_size" json:"response_size"`
+	RBACDecision string         `db:"rbac_decision" json:"rbac_decision"`
+	Metadata     map[string]any `db:"metadata" json:"metadata"`
+	HashChain    string         `db:"hash_chain" json:"hash_chain"`
 }
 
 type Session struct {
