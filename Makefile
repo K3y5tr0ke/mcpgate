@@ -15,7 +15,7 @@ BIN         := bin/mcpgate
         migrate-up migrate-down migrate-create \
         docker-up docker-down docker-up-examples \
         ci ci-fast ci-services \
-        seed seed-idp seed-examples setup-dev stop clean install-hooks help
+        seed seed-idp seed-examples smoke-examples setup-dev stop clean install-hooks help
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -133,6 +133,20 @@ seed-examples:
 	fi
 	MCPGATE_TOKEN=$(MCPGATE_TOKEN) bash examples/seed-example-servers.sh
 
+# Register the example MCP servers (idempotent) and probe each transport with a
+# tools/list call — a quick end-to-end check that the proxy reaches every upstream.
+# Requires MCPGATE_TOKEN and a running mcpgate instance; run 'make build-examples'
+# and 'make docker-up-examples' first. Exits non-zero if any probe fails.
+smoke-examples:
+	@if [ -z "$(MCPGATE_TOKEN)" ]; then \
+	  echo "MCPGATE_TOKEN is required."; \
+	  echo "Get one with: curl -s -X POST http://localhost:8080/auth/local/login \\"; \
+	  echo "  -H 'Content-Type: application/json' \\"; \
+	  echo "  -d '{\"email\":\"admin@mcpgate.local\",\"password\":\"<password>\"}' | jq -r .token"; \
+	  exit 1; \
+	fi
+	MCPGATE_TOKEN=$(MCPGATE_TOKEN) bash examples/smoke-example-servers.sh
+
 # Full first-time dev environment setup.
 # Starts services, applies migrations, seeds DB + IdP, then starts servers.
 setup-dev:
@@ -207,6 +221,7 @@ help:
 	@echo "  seed               Seed database with default roles and admin user"
 	@echo "  seed-idp           Upsert Auth0 dev SAML IdP config into Postgres"
 	@echo "  seed-examples      Register example MCP servers via admin API (needs MCPGATE_TOKEN)"
+	@echo "  smoke-examples     Register + probe example MCP servers with tools/list (needs MCPGATE_TOKEN)"
 	@echo "  setup-dev          Full first-time setup: services + migrate + seed + seed-idp + start"
 	@echo "  stop               Kill the running mcpgate server (ports 8080 + 9090)"
 	@echo "  clean              Remove build artifacts"
