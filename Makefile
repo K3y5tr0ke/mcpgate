@@ -145,8 +145,8 @@ seed-idp:
 # (the hash input representation changed, so entries written before the fix
 # fail GET /logs/verify). DESTRUCTIVE — refuses to run against a non-local DB.
 reset-audit-log:
-	@echo "$(DATABASE_URL)" | grep -q '@localhost' || { \
-	  echo "Refusing: DATABASE_URL is not a localhost dev database."; exit 1; }
+	@echo "$(DATABASE_URL)" | grep -qE '@localhost([:/]|$$)' || { \
+	  echo "Refusing: DATABASE_URL host is not exactly localhost."; exit 1; }
 	@echo "Truncating audit_logs (dev) to reseed the hash chain..."
 	@echo "  (TRUNCATE needs an exclusive lock — stop mcpgate first if this times out.)"
 	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 \
