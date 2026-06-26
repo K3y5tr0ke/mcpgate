@@ -4,7 +4,7 @@ import { Badge } from '../../components/ui/Badge'
 import { circuitStateBadge, statusBadge } from '../../components/ui/badges'
 import { SparklineChart } from '../../components/charts/SparklineChart'
 import { AppShell } from '../../components/layout/AppShell'
-import { format } from 'date-fns'
+import { safeFormat } from '../../lib/datetime'
 
 function MetricCard({
   label,
@@ -89,7 +89,7 @@ export function DashboardPage() {
               {(logsData?.entries ?? []).map((e) => (
                 <li key={e.id} className="flex items-center gap-3 py-2 text-sm">
                   <span className="w-32 truncate text-gray-400 text-xs">
-                    {format(new Date(e.timestamp), 'HH:mm:ss')}
+                    {safeFormat(e.timestamp, 'HH:mm:ss')}
                   </span>
                   <span className="w-40 truncate text-gray-700">{e.user_email}</span>
                   <Badge color="blue">{e.server_name}</Badge>

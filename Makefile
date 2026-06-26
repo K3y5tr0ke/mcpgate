@@ -15,7 +15,7 @@ BIN         := bin/mcpgate
         migrate-up migrate-down migrate-create \
         docker-up docker-down docker-up-examples \
         ci ci-fast ci-services \
-        seed seed-idp seed-examples smoke-examples call-examples setup-dev stop clean install-hooks help
+        seed seed-idp reset-audit-log seed-examples smoke-examples call-examples setup-dev stop clean install-hooks help
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -74,10 +74,28 @@ test-coverage:
 
 # ── Linting and security ──────────────────────────────────────────────────────
 
+# .golangci.yml is v2-format. A v1 binary fails with a cryptic
+# "configuration file ... for v2 ... with v1" message, so guard the version up
+# front with an actionable error. Install v2 with:
+#   go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+define REQUIRE_GOLANGCI_V2
+	@command -v golangci-lint >/dev/null 2>&1 || { \
+	  echo "golangci-lint not found. Install v2:"; \
+	  echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
+	  exit 1; }
+	@golangci-lint version 2>&1 | grep -qE 'version v?2\.' || { \
+	  echo "golangci-lint v2 required (.golangci.yml is v2-format), found:"; \
+	  golangci-lint version 2>&1 | head -1; \
+	  echo "Upgrade: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
+	  exit 1; }
+endef
+
 lint:
+	$(REQUIRE_GOLANGCI_V2)
 	golangci-lint run ./...
 
 lint-fix:
+	$(REQUIRE_GOLANGCI_V2)
 	golangci-lint run --fix ./...
 
 security-scan:
@@ -104,6 +122,8 @@ docker-down:
 	docker compose -f deployments/docker/docker-compose.dev.yml down -v
 
 # Start the dev stack plus the two containerised example MCP servers.
+# The example build contexts are ../.. (repo root) because Compose resolves
+# relative paths against the first -f file's directory (deployments/docker).
 docker-up-examples:
 	docker compose \
 	  -f deployments/docker/docker-compose.dev.yml \
@@ -119,6 +139,19 @@ seed:
 # Idempotent — safe to run multiple times.
 seed-idp:
 	psql "$(DATABASE_URL)" -f scripts/seed_auth0_idp.sql
+
+# DEV ONLY. Truncate the audit_logs table so the tamper-evident hash chain
+# restarts from a clean seed. Needed once after the audit-log json-tag fix
+# (the hash input representation changed, so entries written before the fix
+# fail GET /logs/verify). DESTRUCTIVE — refuses to run against a non-local DB.
+reset-audit-log:
+	@echo "$(DATABASE_URL)" | grep -q '@localhost' || { \
+	  echo "Refusing: DATABASE_URL is not a localhost dev database."; exit 1; }
+	@echo "Truncating audit_logs (dev) to reseed the hash chain..."
+	@echo "  (TRUNCATE needs an exclusive lock — stop mcpgate first if this times out.)"
+	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 \
+	  -c "SET lock_timeout = '5s';" -c "TRUNCATE audit_logs;"
+	@echo "Done. Restart mcpgate so the chain reseeds from an empty table."
 
 # Register the three example MCP servers via the admin REST API.
 # Requires MCPGATE_TOKEN (a valid admin JWT) and a running mcpgate instance.
@@ -234,6 +267,7 @@ help:
 	@echo "  install-hooks      Install git pre-push hook"
 	@echo "  seed               Seed database with default roles and admin user"
 	@echo "  seed-idp           Upsert Auth0 dev SAML IdP config into Postgres"
+	@echo "  reset-audit-log    DEV: truncate audit_logs to reseed the hash chain"
 	@echo "  seed-examples      Register example MCP servers via admin API (needs MCPGATE_TOKEN)"
 	@echo "  smoke-examples     Register + probe example MCP servers with tools/list (needs MCPGATE_TOKEN)"
 	@echo "  call-examples      Invoke tools/resources/prompts on each server via the proxy (needs MCPGATE_TOKEN)"

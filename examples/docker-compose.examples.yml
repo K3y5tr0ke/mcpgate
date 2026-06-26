@@ -14,8 +14,12 @@ name: mcpgate-examples
 services:
   mcp-streamable:
     build:
-      # Build context is the repo root so the common/ package is reachable.
-      context: ..
+      # Build context must be the repo root so the go.mod / common/ package is
+      # reachable. When this file is overlaid on the dev compose file, Compose
+      # uses the FIRST -f file's directory (deployments/docker) as the base for
+      # relative paths — so the context is ../.. (repo root), not .. . The
+      # dockerfile path is then relative to the context (repo root).
+      context: ../..
       dockerfile: examples/mcp-servers/streamable-http/Dockerfile
     environment:
       MCP_SERVER_NAME: streamable-http
@@ -33,7 +37,7 @@ services:
 
   mcp-sse:
     build:
-      context: ..
+      context: ../..
       dockerfile: examples/mcp-servers/sse/Dockerfile
     environment:
       MCP_SERVER_NAME: sse

@@ -3,7 +3,7 @@ import type { AuditLogEntry } from '../../api/types'
 import { Badge } from '../ui/Badge'
 import { statusBadge } from '../ui/badges'
 import { Button } from '../ui/Button'
-import { format } from 'date-fns'
+import { safeFormat } from '../../lib/datetime'
 
 const MAX_ENTRIES = 200
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/v1/admin/logs/stream`
@@ -104,7 +104,7 @@ export function LiveLogPanel({ serverFilter }: Props) {
           entries.map((e, i) => (
             <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-gray-900 rounded px-1">
               <span className="shrink-0 text-gray-500 tabular-nums">
-                {format(new Date(e.timestamp), 'HH:mm:ss.SSS')}
+                {safeFormat(e.timestamp, 'HH:mm:ss.SSS')}
               </span>
               <Badge color="blue">{e.server_name}</Badge>
               <span className="text-gray-300">{e.mcp_method}</span>

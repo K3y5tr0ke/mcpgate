@@ -10,7 +10,7 @@ import { Button } from '../../components/ui/Button'
 import { DataDrawer } from '../../components/ui/DataDrawer'
 import { Table } from '../../components/ui/Table'
 import type { Column } from '../../components/ui/Table'
-import { format } from 'date-fns'
+import { safeFormat } from '../../lib/datetime'
 import { LiveLogPanel } from '../../components/logs/LiveLogPanel'
 
 async function downloadLogs(
@@ -64,7 +64,7 @@ export function LogsListPage() {
       header: 'Time',
       render: (e) => (
         <span className="text-xs text-gray-400 tabular-nums">
-          {format(new Date(e.timestamp), 'HH:mm:ss.SSS')}
+          {safeFormat(e.timestamp, 'HH:mm:ss.SSS')}
         </span>
       ),
     },
@@ -198,7 +198,7 @@ export function LogsListPage() {
       >
         {selected && (
           <div className="space-y-4 text-sm">
-            <LogRow label="Time" value={format(new Date(selected.timestamp), 'yyyy-MM-dd HH:mm:ss.SSS')} />
+            <LogRow label="Time" value={safeFormat(selected.timestamp, 'yyyy-MM-dd HH:mm:ss.SSS')} />
             <LogRow label="Trace ID" value={selected.trace_id} mono />
             <LogRow label="Session ID" value={selected.session_id} mono />
             <LogRow label="User" value={selected.user_email} />
