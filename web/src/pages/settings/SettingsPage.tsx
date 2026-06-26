@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useSettings, useUpdateSettings } from '../../api/queries'
 import type { Settings } from '../../api/types'
 import { AppShell } from '../../components/layout/AppShell'
@@ -40,9 +40,14 @@ export function SettingsPage() {
   const [draft, setDraft] = useState<Partial<Settings>>({})
   const [saved, setSaved] = useState(false)
 
-  useEffect(() => {
-    if (settings) setDraft({ ...settings })
-  }, [settings])
+  // Seed the editable draft from fetched settings without an effect. Re-syncs
+  // whenever the settings object identity changes (i.e. after a fresh load),
+  // matching the previous [settings]-dependency behaviour.
+  const [syncedFrom, setSyncedFrom] = useState<Settings | undefined>(undefined)
+  if (settings && settings !== syncedFrom) {
+    setSyncedFrom(settings)
+    setDraft({ ...settings })
+  }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
@@ -70,7 +75,7 @@ export function SettingsPage() {
         ) : (
           <form onSubmit={handleSave} className="space-y-4">
             <Card title="General">
-              <div className="divide-y divide-gray-50">
+              <div className="divide-y divide-gray-50 dark:divide-gray-700">
                 {knownKeys.map((key) => {
                   const meta = SETTING_META[key]
                   const val = draft[key] ?? settings?.[key]
@@ -84,7 +89,7 @@ export function SettingsPage() {
                         <select
                           value={String(val ?? false)}
                           onChange={(e) => setValue(key, e.target.value, 'boolean')}
-                          className="h-9 w-24 rounded-md border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="h-9 w-24 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                         >
                           <option value="true">Enabled</option>
                           <option value="false">Disabled</option>
@@ -95,7 +100,7 @@ export function SettingsPage() {
                           value={String(val ?? 0)}
                           min={0}
                           onChange={(e) => setValue(key, e.target.value, 'number')}
-                          className="h-9 w-28 rounded-md border border-gray-300 px-3 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="h-9 w-28 rounded-md border border-gray-300 bg-white px-3 text-sm tabular-nums text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                         />
                       )}
                     </SettingRow>
@@ -106,7 +111,7 @@ export function SettingsPage() {
 
             {extraKeys.length > 0 && (
               <Card title="Other settings">
-                <div className="divide-y divide-gray-50">
+                <div className="divide-y divide-gray-50 dark:divide-gray-700">
                   {extraKeys.map((key) => {
                     const val = draft[key] ?? settings?.[key]
                     return (
@@ -114,7 +119,7 @@ export function SettingsPage() {
                         <input
                           value={String(val ?? '')}
                           onChange={(e) => setValue(key, e.target.value, 'string')}
-                          className="h-9 w-40 rounded-md border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="h-9 w-40 rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                         />
                       </SettingRow>
                     )
@@ -148,7 +153,7 @@ function SettingRow({
   return (
     <div className="flex items-center justify-between py-3">
       <div className="pr-4">
-        <p className="text-sm font-medium text-gray-900">{label}</p>
+        <p className="text-sm font-medium text-gray-900 dark:text-white">{label}</p>
         {description && <p className="text-xs text-gray-400">{description}</p>}
       </div>
       {children}

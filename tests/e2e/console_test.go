@@ -36,6 +36,27 @@ func TestE2E_Console_IndexHTMLServed(t *testing.T) {
 	}
 }
 
+// TestE2E_Console_LoginPageServed verifies that /console/login serves the SPA
+// shell (200 + text/html). This is the unauthenticated landing route the 401
+// redirect points at; a routing regression here would break local admin login.
+func TestE2E_Console_LoginPageServed(t *testing.T) {
+	ts := newTestServer(t)
+
+	resp, err := http.Get(ts.url + "/console/login")
+	if err != nil {
+		t.Fatalf("GET /console/login: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("want 200, got %d: %s", resp.StatusCode, body)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type: got %q, want text/html prefix", ct)
+	}
+}
+
 // TestE2E_Console_RootRedirectsToDashboard verifies that /console redirects to
 // /console/dashboard rather than returning 404 or a blank page.
 func TestE2E_Console_RootRedirectsToDashboard(t *testing.T) {

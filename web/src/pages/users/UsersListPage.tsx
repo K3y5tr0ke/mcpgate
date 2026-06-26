@@ -3,13 +3,14 @@ import { useUsers, usePatchUser, useRoles } from '../../api/queries'
 import type { User } from '../../api/types'
 import { AppShell } from '../../components/layout/AppShell'
 import { Card } from '../../components/ui/Card'
-import { Badge, statusBadge } from '../../components/ui/Badge'
+import { Badge } from '../../components/ui/Badge'
+import { statusBadge } from '../../components/ui/badges'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { DataDrawer } from '../../components/ui/DataDrawer'
 import { Table } from '../../components/ui/Table'
 import type { Column } from '../../components/ui/Table'
-import { format } from 'date-fns'
+import { safeFormat } from '../../lib/datetime'
 
 export function UsersListPage() {
   const [emailFilter, setEmailFilter] = useState('')
@@ -70,7 +71,7 @@ export function UsersListPage() {
       header: 'Created',
       render: (u) => (
         <span className="text-xs text-gray-400">
-          {format(new Date(u.created_at), 'yyyy-MM-dd')}
+          {safeFormat(u.created_at, 'yyyy-MM-dd')}
         </span>
       ),
     },
@@ -146,7 +147,7 @@ export function UsersListPage() {
                 <Row label="IdP subject" value={selected.idp_subject || '—'} mono />
                 <Row
                   label="Created"
-                  value={format(new Date(selected.created_at), 'yyyy-MM-dd HH:mm:ss')}
+                  value={safeFormat(selected.created_at, 'yyyy-MM-dd HH:mm:ss')}
                 />
               </dl>
             </section>

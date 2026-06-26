@@ -6,6 +6,8 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +20,10 @@ import (
 	"github.com/K3y5tr0ke/mcpgate/internal/auth/jwks"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
+
+func slogDiscard() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 // --- helpers ---
 
@@ -288,6 +294,59 @@ func TestValidator_PermissionsClaim(t *testing.T) {
 	}
 	if len(identity.Roles) != 3 {
 		t.Errorf("Roles: got %v, want [read write admin]", identity.Roles)
+	}
+}
+
+// TestValidator_Invalidate verifies that invalidating an issuer forces the next
+// validation to re-fetch the JWKS (a fresh HTTP hit), and that invalidating an
+// unknown issuer is a harmless no-op.
+func TestValidator_Invalidate(t *testing.T) {
+	k := newKey(t)
+	var fetches int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches++
+		w.Write(jwksBody(t, "k1", &k.PublicKey)) //nolint:errcheck,gosec
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &store.JWKSConfig{
+		Issuer:  "https://issuer.example.com/",
+		JWKSURL: srv.URL,
+	}
+	v := jwks.NewValidator(&mockStore{cfg: cfg}, time.Hour, slogDiscard())
+
+	mkToken := func() string {
+		return signToken(t, k, "k1", cfg.Issuer, "sub", "aud", time.Now().Add(time.Hour), nil)
+	}
+
+	// First validation populates the cache (fetch #1).
+	if _, err := v.ValidateToken(context.Background(), mkToken()); err != nil {
+		t.Fatalf("first validate: %v", err)
+	}
+	// Second validation reuses the cached client — no new fetch.
+	if _, err := v.ValidateToken(context.Background(), mkToken()); err != nil {
+		t.Fatalf("second validate: %v", err)
+	}
+	if fetches != 1 {
+		t.Fatalf("before invalidate: got %d fetches, want 1", fetches)
+	}
+
+	// Invalidating an unknown issuer must not affect the cached one.
+	v.Invalidate("https://unrelated.example.com/")
+	if _, err := v.ValidateToken(context.Background(), mkToken()); err != nil {
+		t.Fatalf("validate after no-op invalidate: %v", err)
+	}
+	if fetches != 1 {
+		t.Fatalf("after no-op invalidate: got %d fetches, want 1", fetches)
+	}
+
+	// Invalidating the real issuer forces a re-fetch on the next validation.
+	v.Invalidate(cfg.Issuer)
+	if _, err := v.ValidateToken(context.Background(), mkToken()); err != nil {
+		t.Fatalf("validate after invalidate: %v", err)
+	}
+	if fetches != 2 {
+		t.Errorf("after invalidate: got %d fetches, want 2", fetches)
 	}
 }
 

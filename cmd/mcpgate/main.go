@@ -1,3 +1,5 @@
+//go:generate npm --prefix ../../web run build
+
 package main
 
 import (

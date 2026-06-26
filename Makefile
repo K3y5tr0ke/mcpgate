@@ -18,12 +18,12 @@ MIGRATIONS  := internal/store/postgres/migrations
 BIN         := bin/mcpgate
 
 .PHONY: build build-web build-docker build-examples dev dev-frontend \
-        test-unit test-integration test-coverage \
+        test-unit test-integration test-frontend test-e2e-playwright test-coverage \
         lint lint-fix security-scan \
         migrate-up migrate-down migrate-create \
         docker-up docker-down docker-up-examples \
         ci ci-fast ci-services \
-        seed seed-idp seed-examples setup-dev stop clean install-hooks help
+        seed seed-idp reset-audit-log seed-examples smoke-examples call-examples setup-dev stop clean install-hooks help
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -65,6 +65,16 @@ test-unit:
 test-integration:
 	$(GVM_GO) test -race -count=1 -tags=integration ./internal/...
 
+# Frontend lint (ESLint) + unit/component tests (Vitest, jsdom). Fast, no Docker —
+# runs in ci-fast.
+test-frontend:
+	$(NVM) cd web && npm run lint && npm run test
+
+# Playwright E2E — needs a running stack (server + Postgres + Redis). NOT in
+# ci-fast; invoked by the ci pipeline / a dedicated CI job against docker-compose.
+test-e2e-playwright:
+	$(NVM) cd web && npx playwright test --project=chromium
+
 test-coverage:
 	$(GVM_GO) test -race -coverprofile=coverage.out -covermode=atomic ./internal/...
 	$(GVM_GO) tool cover -html=coverage.out -o coverage.html
@@ -72,10 +82,28 @@ test-coverage:
 
 # ── Linting and security ──────────────────────────────────────────────────────
 
+# .golangci.yml is v2-format. A v1 binary fails with a cryptic
+# "configuration file ... for v2 ... with v1" message, so guard the version up
+# front with an actionable error. Install v2 with:
+#   go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+define REQUIRE_GOLANGCI_V2
+	@command -v golangci-lint >/dev/null 2>&1 || { \
+	  echo "golangci-lint not found. Install v2:"; \
+	  echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
+	  exit 1; }
+	@golangci-lint version 2>&1 | grep -qE 'version v?2\.' || { \
+	  echo "golangci-lint v2 required (.golangci.yml is v2-format), found:"; \
+	  golangci-lint version 2>&1 | head -1; \
+	  echo "Upgrade: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
+	  exit 1; }
+endef
+
 lint:
+	$(REQUIRE_GOLANGCI_V2)
 	golangci-lint run ./...
 
 lint-fix:
+	$(REQUIRE_GOLANGCI_V2)
 	golangci-lint run --fix ./...
 
 security-scan:
@@ -102,6 +130,8 @@ docker-down:
 	docker compose -f deployments/docker/docker-compose.dev.yml down -v
 
 # Start the dev stack plus the two containerised example MCP servers.
+# The example build contexts are ../.. (repo root) because Compose resolves
+# relative paths against the first -f file's directory (deployments/docker).
 docker-up-examples:
 	docker compose \
 	  -f deployments/docker/docker-compose.dev.yml \
@@ -118,6 +148,19 @@ seed:
 seed-idp:
 	psql "$(DATABASE_URL)" -f scripts/seed_auth0_idp.sql
 
+# DEV ONLY. Truncate the audit_logs table so the tamper-evident hash chain
+# restarts from a clean seed. Needed once after the audit-log json-tag fix
+# (the hash input representation changed, so entries written before the fix
+# fail GET /logs/verify). DESTRUCTIVE — refuses to run against a non-local DB.
+reset-audit-log:
+	@echo "$(DATABASE_URL)" | grep -qE '@localhost([:/]|$$)' || { \
+	  echo "Refusing: DATABASE_URL host is not exactly localhost."; exit 1; }
+	@echo "Truncating audit_logs (dev) to reseed the hash chain..."
+	@echo "  (TRUNCATE needs an exclusive lock — stop mcpgate first if this times out.)"
+	psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 \
+	  -c "SET lock_timeout = '5s';" -c "TRUNCATE audit_logs;"
+	@echo "Done. Restart mcpgate so the chain reseeds from an empty table."
+
 # Register the three example MCP servers via the admin REST API.
 # Requires MCPGATE_TOKEN (a valid admin JWT) and a running mcpgate instance.
 # Run 'make build-examples' first so the stdio binary is available.
@@ -130,6 +173,34 @@ seed-examples:
 	  exit 1; \
 	fi
 	MCPGATE_TOKEN=$(MCPGATE_TOKEN) bash examples/seed-example-servers.sh
+
+# Register the example MCP servers (idempotent) and probe each transport with a
+# tools/list call — a quick end-to-end check that the proxy reaches every upstream.
+# Requires MCPGATE_TOKEN and a running mcpgate instance; run 'make build-examples'
+# and 'make docker-up-examples' first. Exits non-zero if any probe fails.
+smoke-examples:
+	@if [ -z "$(MCPGATE_TOKEN)" ]; then \
+	  echo "MCPGATE_TOKEN is required."; \
+	  echo "Get one with: curl -s -X POST http://localhost:8080/auth/local/login \\"; \
+	  echo "  -H 'Content-Type: application/json' \\"; \
+	  echo "  -d '{\"email\":\"admin@mcpgate.local\",\"password\":\"<password>\"}' | jq -r .token"; \
+	  exit 1; \
+	fi
+	MCPGATE_TOKEN=$(MCPGATE_TOKEN) bash examples/smoke-example-servers.sh
+
+# Exploratory client: walk every registered server and invoke its tools,
+# resources, and prompts through the proxy, printing the responses. Requires
+# MCPGATE_TOKEN and a running mcpgate instance with reachable upstreams.
+# For a single raw call, run examples/call-example-tools.sh --call ... directly.
+call-examples:
+	@if [ -z "$(MCPGATE_TOKEN)" ]; then \
+	  echo "MCPGATE_TOKEN is required."; \
+	  echo "Get one with: curl -s -X POST http://localhost:8080/auth/local/login \\"; \
+	  echo "  -H 'Content-Type: application/json' \\"; \
+	  echo "  -d '{\"email\":\"admin@mcpgate.local\",\"password\":\"<password>\"}' | jq -r .token"; \
+	  exit 1; \
+	fi
+	MCPGATE_TOKEN=$(MCPGATE_TOKEN) bash examples/call-example-tools.sh
 
 # Full first-time dev environment setup.
 # Starts services, applies migrations, seeds DB + IdP, then starts servers.
@@ -144,9 +215,9 @@ setup-dev:
 
 # ── Local CI ──────────────────────────────────────────────────────────────────
 
-# Fast check: lint + unit tests + build — no Docker needed (~30s).
+# Fast check: lint + Go unit + frontend unit + build — no Docker needed (~30s).
 # Run by the pre-push git hook on every push.
-ci-fast: lint test-unit build
+ci-fast: lint test-unit test-frontend build
 
 # Start only the CI services (Postgres + Redis) and wait until healthy.
 ci-services:
@@ -154,7 +225,10 @@ ci-services:
 
 # Full local CI pipeline — mirrors the removed .github/workflows/ci.yml.
 # Run this before opening a PR or merging to main.
-ci: lint test-unit ci-services migrate-up test-integration build security-scan
+# Playwright E2E (test-e2e-playwright) is NOT included here: it needs a running
+# server + seeded admin, which a dedicated CI job provisions (docker-compose up →
+# migrate-up → seed → serve & → health-wait → make test-e2e-playwright).
+ci: lint test-unit test-frontend ci-services migrate-up test-integration build security-scan
 	@echo ""
 	@echo "All CI checks passed."
 
@@ -201,7 +275,10 @@ help:
 	@echo "  install-hooks      Install git pre-push hook"
 	@echo "  seed               Seed database with default roles and admin user"
 	@echo "  seed-idp           Upsert Auth0 dev SAML IdP config into Postgres"
+	@echo "  reset-audit-log    DEV: truncate audit_logs to reseed the hash chain"
 	@echo "  seed-examples      Register example MCP servers via admin API (needs MCPGATE_TOKEN)"
+	@echo "  smoke-examples     Register + probe example MCP servers with tools/list (needs MCPGATE_TOKEN)"
+	@echo "  call-examples      Invoke tools/resources/prompts on each server via the proxy (needs MCPGATE_TOKEN)"
 	@echo "  setup-dev          Full first-time setup: services + migrate + seed + seed-idp + start"
 	@echo "  stop               Kill the running mcpgate server (ports 8080 + 9090)"
 	@echo "  clean              Remove build artifacts"

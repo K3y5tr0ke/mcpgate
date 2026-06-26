@@ -44,16 +44,41 @@ if [[ ! -x "$STDIO_PATH" ]]; then
     echo "                The streamable-http and SSE servers will still be registered."
 fi
 
-api_post() {
-    local body="$1"
-    curl -sf -X POST "${BASE_URL}/api/v1/admin/servers" \
+# server_exists returns 0 if a server with the given name is already registered.
+# (The admin API returns 500 on a duplicate name, so existence is checked up
+# front rather than relying on the create response code.)
+server_exists() {
+    local name="$1"
+    curl -s "${BASE_URL}/api/v1/admin/servers" \
          -H "Authorization: Bearer ${MCPGATE_TOKEN}" \
-         -H "Content-Type: application/json" \
-         -d "$body"
+      | jq -e --arg n "$name" '.servers[]? | select(.name == $n)' >/dev/null 2>&1
 }
 
+# register creates a server only if it does not already exist (idempotent —
+# safe to re-run).
+register() {
+    local name="$1" body="$2"
+    if server_exists "$name"; then
+        echo "  already registered — skipping."
+        return 0
+    fi
+    local resp code
+    resp=$(curl -s -w $'\n%{http_code}' -X POST "${BASE_URL}/api/v1/admin/servers" \
+         -H "Authorization: Bearer ${MCPGATE_TOKEN}" \
+         -H "Content-Type: application/json" \
+         -d "$body")
+    code=$(printf '%s' "$resp" | tail -n1)
+    if [[ "$code" == "201" ]]; then
+        echo "  created."
+    else
+        echo "  ERROR: HTTP $code"; printf '%s\n' "$resp" | sed '$d'; return 1
+    fi
+}
+
+command -v jq >/dev/null 2>&1 || { echo "jq is required (brew install jq)."; exit 1; }
+
 echo "[seed-examples] Registering example-streamable (Streamable HTTP)..."
-api_post "$(cat <<EOF
+register "example-streamable" "$(cat <<EOF
 {
   "name":        "example-streamable",
   "description": "Example Streamable HTTP MCP server — echo, add, slow_echo tools",
@@ -66,7 +91,7 @@ EOF
 echo ""
 
 echo "[seed-examples] Registering example-sse (SSE)..."
-api_post "$(cat <<EOF
+register "example-sse" "$(cat <<EOF
 {
   "name":        "example-sse",
   "description": "Example SSE MCP server — echo, add, slow_echo tools",
@@ -83,7 +108,7 @@ echo ""
 
 if [[ -x "$STDIO_PATH" ]]; then
     echo "[seed-examples] Registering example-stdio (stdio)..."
-    api_post "$(cat <<EOF
+    register "example-stdio" "$(cat <<EOF
 {
   "name":        "example-stdio",
   "description": "Example stdio MCP server — echo, add, slow_echo tools",

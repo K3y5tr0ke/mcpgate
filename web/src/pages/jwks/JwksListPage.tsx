@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useJWKSConfigs, useCreateJWKSConfig, useUpdateJWKSConfig, useDeleteJWKSConfig } from '../../api/queries'
+import { useJWKSConfigs, useCreateJWKSConfig, useUpdateJWKSConfig, useDeleteJWKSConfig, useRotateJWKS } from '../../api/queries'
 import type { JWKSConfig } from '../../api/types'
 import { AppShell } from '../../components/layout/AppShell'
 import { Card } from '../../components/ui/Card'
@@ -41,6 +41,7 @@ export function JwksListPage() {
   const createConfig = useCreateJWKSConfig()
   const updateConfig = useUpdateJWKSConfig()
   const deleteConfig = useDeleteJWKSConfig()
+  const rotateConfig = useRotateJWKS()
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<JWKSConfig | null>(null)
@@ -80,6 +81,15 @@ export function JwksListPage() {
     await deleteConfig.mutateAsync(cfg.id)
   }
 
+  async function handleRotate(cfg: JWKSConfig) {
+    try {
+      const res = await rotateConfig.mutateAsync(cfg.id)
+      alert(`Rotated "${cfg.name}" — issuer advertises ${res.key_count} key(s). Cache evicted.`)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Rotate failed')
+    }
+  }
+
   const columns: Column<JWKSConfig>[] = [
     {
       key: 'name',
@@ -115,6 +125,14 @@ export function JwksListPage() {
         <div className="flex justify-end gap-2">
           <Button size="sm" variant="secondary" onClick={() => openEdit(cfg)}>
             Edit
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => handleRotate(cfg)}
+            loading={rotateConfig.isPending}
+          >
+            Rotate
           </Button>
           <Button
             size="sm"

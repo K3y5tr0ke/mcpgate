@@ -146,6 +146,18 @@ func (v *Validator) ValidateToken(ctx context.Context, tokenStr string) (*auth.U
 	}, nil
 }
 
+// Invalidate drops the cached JWKS client for the given issuer so the next
+// token validation re-fetches the key set. Used by the admin rotate endpoint
+// when an upstream issuer rotates its signing keys. No-op if no entry exists.
+func (v *Validator) Invalidate(issuer string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if _, ok := v.clients[issuer]; ok {
+		delete(v.clients, issuer)
+		v.logger.Info("jwks: invalidated client cache", "issuer", issuer)
+	}
+}
+
 // clientFor returns the cached Client for the given issuer, creating one if needed,
 // and stamps lastUsed so the eviction goroutine can age out stale entries.
 func (v *Validator) clientFor(issuer, jwksURL string) *Client {

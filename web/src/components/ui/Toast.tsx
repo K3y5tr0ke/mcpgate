@@ -1,19 +1,12 @@
-import { createContext, useCallback, useContext, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { clsx } from 'clsx'
+import { ToastContext, type ToastContextValue } from './toast-context'
 
 interface ToastItem {
   id: number
   type: 'success' | 'error' | 'info'
   message: string
 }
-
-interface ToastContextValue {
-  success: (msg: string) => void
-  error: (msg: string) => void
-  info: (msg: string) => void
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null)
 
 let nextId = 0
 
@@ -54,16 +47,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function useToast() {
-  const ctx = useContext(ToastContext)
-  if (!ctx) throw new Error('useToast must be used within ToastProvider')
-  return ctx
-}
-
-// Named export for backward-compat with the index barrel.
-export { ToastContext }
-
-// Stub component that re-exports provider as Toast for convenience.
+// Convenience wrapper that mounts the provider.
 export function Toast({ children }: { children: React.ReactNode }) {
   return <ToastProvider>{children}</ToastProvider>
 }

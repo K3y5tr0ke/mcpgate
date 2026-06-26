@@ -177,43 +177,124 @@ func histogramP95MS(mfs []*dto.MetricFamily, name string) float64 {
 	return 0
 }
 
-// timeseries returns the last 60 per-minute request counts for dashboard sparklines.
-// Keys follow the pattern "metrics:ts:<unix_minute>" written by the metrics middleware.
+// windowSpec defines, for a supported ?window= value, the total span and the
+// display-bucket size — both in minutes. The bucket size is server-derived so
+// the response stays bounded (≤ ~100 points) regardless of window length.
+// The number of display buckets is totalMins / bucketMins.
+type windowSpec struct {
+	label      string
+	totalMins  int
+	bucketMins int
+}
+
+// windowSpecs is the lookup table of supported windows. Each window divides
+// evenly by its bucket size (no ragged final bucket).
+//
+//	1h  →  60 ×  1m  (60 pts)
+//	6h  → 360 ×  5m  (72 pts)
+//	24h → 1440 × 15m (96 pts)
+//	7d  → 10080 × 2h (84 pts)
+//
+// A future ?bucket= override can replace bucketMins here, clamped so that
+// totalMins/bucketMins stays under a sane cap (~500).
+var windowSpecs = map[string]windowSpec{
+	"1h":  {label: "1h", totalMins: 60, bucketMins: 1},
+	"6h":  {label: "6h", totalMins: 360, bucketMins: 5},
+	"24h": {label: "24h", totalMins: 1440, bucketMins: 15},
+	"7d":  {label: "7d", totalMins: 10080, bucketMins: 120},
+}
+
+// bucketLabel renders a bucket size in minutes as a compact string (e.g. "1m", "15m", "2h").
+func bucketLabel(mins int) string {
+	if mins%60 == 0 {
+		return fmt.Sprintf("%dh", mins/60)
+	}
+	return fmt.Sprintf("%dm", mins)
+}
+
+// timeseries returns per-bucket request counts for the dashboard charts.
+//
+// Query params:
+//   - window: one of 1h/6h/24h/7d (default 1h). Unknown values → 400.
+//   - server: optional server name; when set, reads the per-server keys
+//     "metrics:ts:srv:<server>:<minute>" instead of the global "metrics:ts:<minute>".
+//
+// The middleware only writes 1-minute keys, so for bucket sizes > 1m the handler
+// sums every per-minute key spanning a display bucket. The response reports the
+// chosen window, bucket size, and resolution_secs so the client can format axes.
 // Falls back to a single-point series when Redis is unavailable.
 func (h *metricsHandler) timeseries(w http.ResponseWriter, r *http.Request) {
 	type bucket struct {
-		Minute   int64 `json:"minute"` // unix minute (epoch seconds / 60)
+		Minute   int64 `json:"minute"` // unix minute (epoch seconds / 60) of the bucket's start
 		Requests int64 `json:"requests"`
 	}
 
-	const numBuckets = 60
-	now := time.Now().Unix() / 60
-
-	if h.redis == nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"buckets": []bucket{{Minute: now, Requests: h.collector.RequestsLastMinute()}},
-		})
+	windowParam := r.URL.Query().Get("window")
+	if windowParam == "" {
+		windowParam = "1h"
+	}
+	spec, ok := windowSpecs[windowParam]
+	if !ok {
+		writeJSONError(w, http.StatusBadRequest, "invalid window (use 1h, 6h, 24h, or 7d)")
 		return
 	}
 
+	server := r.URL.Query().Get("server")
+	keyPrefix := "metrics:ts:"
+	if server != "" {
+		keyPrefix = fmt.Sprintf("metrics:ts:srv:%s:", server)
+	}
+
+	numBuckets := spec.totalMins / spec.bucketMins
+	resolutionSecs := spec.bucketMins * 60
+	now := time.Now().Unix() / 60
+
+	respond := func(buckets []bucket) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"window":          spec.label,
+			"bucket":          bucketLabel(spec.bucketMins),
+			"resolution_secs": resolutionSecs,
+			"buckets":         buckets,
+		})
+	}
+
+	if h.redis == nil {
+		// Without Redis we can only surface the in-process last-minute count, and
+		// only for the global series (no per-server counter exists in memory).
+		var req int64
+		if server == "" {
+			req = h.collector.RequestsLastMinute()
+		}
+		respond([]bucket{{Minute: now, Requests: req}})
+		return
+	}
+
+	// The oldest minute we need is the start of the oldest display bucket.
+	startMin := now - int64(numBuckets*spec.bucketMins) + 1
+
 	ctx := r.Context()
 	pipe := h.redis.Pipeline()
-	cmds := make([]*goredis.StringCmd, numBuckets)
-	for i := 0; i < numBuckets; i++ {
-		bucketMin := now - int64(numBuckets-1-i)
-		cmds[i] = pipe.Get(ctx, fmt.Sprintf("metrics:ts:%d", bucketMin))
+	totalMins := numBuckets * spec.bucketMins
+	cmds := make([]*goredis.StringCmd, totalMins)
+	for m := 0; m < totalMins; m++ {
+		cmds[m] = pipe.Get(ctx, fmt.Sprintf("%s%d", keyPrefix, startMin+int64(m)))
 	}
 	_, _ = pipe.Exec(ctx)
 
 	buckets := make([]bucket, numBuckets)
-	for i, cmd := range cmds {
-		bucketMin := now - int64(numBuckets-1-i)
-		buckets[i].Minute = bucketMin
-		if val, err := cmd.Result(); err == nil {
-			if n, err := strconv.ParseInt(val, 10, 64); err == nil {
-				buckets[i].Requests = n
+	for i := 0; i < numBuckets; i++ {
+		bucketStart := startMin + int64(i*spec.bucketMins)
+		buckets[i].Minute = bucketStart
+		var sum int64
+		for j := 0; j < spec.bucketMins; j++ {
+			cmd := cmds[i*spec.bucketMins+j]
+			if val, err := cmd.Result(); err == nil {
+				if n, perr := strconv.ParseInt(val, 10, 64); perr == nil {
+					sum += n
+				}
 			}
 		}
+		buckets[i].Requests = sum
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"buckets": buckets})
+	respond(buckets)
 }
