@@ -92,8 +92,8 @@ For a detailed walkthrough of each step, the Casbin policy model, and the action
 ```bash
 bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
 source ~/.gvm/scripts/gvm
-gvm install go1.26.0 -B
-gvm use go1.26.0 --default
+gvm install go1.26.4 -B
+gvm use go1.26.4 --default
 ```
 
 **Docker**
@@ -409,8 +409,8 @@ docs/                     Architecture deep-dives, implementation notes, PRD
 
 ## Go version
 
-Pinned to `go1.26.0` via [gvm](https://github.com/moovweb/gvm). The Makefile
-invokes `$HOME/.gvm/gos/go1.26.0/bin/go` directly — no PATH manipulation required.
+Pinned to `go1.26.4` via [gvm](https://github.com/moovweb/gvm). The Makefile
+invokes `$HOME/.gvm/gos/go1.26.4/bin/go` directly — no PATH manipulation required.
 
 ---
 

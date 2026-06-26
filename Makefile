@@ -1,7 +1,15 @@
 SHELL := /bin/bash
 
-GO_VERSION := go1.26.0
+GO_VERSION := go1.26.4
 GVM_GO     := $(HOME)/.gvm/gos/$(GO_VERSION)/bin/go
+# Pin GOROOT *and* PATH to match GO_VERSION so the build is independent of the
+# developer's current `gvm use` selection. Without GOROOT, an inherited value
+# pointing at a different patch release makes the compiler reject the toolchain's
+# own stdlib ("version goX does not match go tool version goY"); without the PATH
+# prefix, tools that shell out to `go` (e.g. golangci-lint's typechecker) pick up
+# a mismatched `go` and hit the same error in reverse.
+export GOROOT := $(HOME)/.gvm/gos/$(GO_VERSION)
+export PATH   := $(HOME)/.gvm/gos/$(GO_VERSION)/bin:$(PATH)
 # Bootstrap nvm so npm/node are on PATH in non-interactive shells (Makefile, git hooks).
 # Usage: $(NVM) npm ci   →  sources nvm then runs the rest of the line.
 NVM        := export NVM_DIR="$${NVM_DIR:-$$HOME/.nvm}"; [ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh";

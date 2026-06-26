@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 
 # ── gvm + Go ──────────────────────────────────────────────────────────────────
 
-GO_VERSION="go1.26.0"
+GO_VERSION="go1.26.4"
 
 if [[ ! -s "$HOME/.gvm/scripts/gvm" ]]; then
     error "gvm not found at \$HOME/.gvm/scripts/gvm"
