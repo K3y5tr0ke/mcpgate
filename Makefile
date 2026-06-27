@@ -18,7 +18,7 @@ MIGRATIONS  := internal/store/postgres/migrations
 BIN         := bin/mcpgate
 
 .PHONY: build build-web build-docker build-examples dev dev-frontend \
-        test-unit test-integration test-frontend test-e2e-playwright test-coverage \
+        test-unit test-integration test-frontend test-e2e-playwright test-e2e test-coverage \
         lint lint-fix security-scan \
         migrate-up migrate-down migrate-create \
         docker-up docker-down docker-up-examples \
@@ -71,10 +71,16 @@ test-integration:
 test-frontend:
 	$(NVM) cd web && npm run lint && npm run test
 
-# Playwright E2E — needs a running stack (server + Postgres + Redis). NOT in
-# ci-fast; invoked by the ci pipeline / a dedicated CI job against docker-compose.
+# Playwright E2E against an ALREADY-RUNNING stack (server + Postgres + Redis).
+# For the self-provisioning, CI-callable variant use `make test-e2e`.
 test-e2e-playwright:
 	$(NVM) cd web && npx playwright test --project=chromium
+
+# Full self-provisioning Playwright E2E (S9-D7, "Playwright in CI"):
+# services → migrate → build → seed (captures admin password) → serve →
+# health-wait → playwright → teardown. This is what a CI job invokes.
+test-e2e:
+	bash scripts/run-playwright.sh
 
 test-coverage:
 	$(GVM_GO) test -race -coverprofile=coverage.out -covermode=atomic ./internal/...
@@ -280,6 +286,7 @@ help:
 	@echo "  dev-all            Start Docker services + backend + frontend"
 	@echo "  test-unit          Run unit tests (no external services)"
 	@echo "  test-integration   Run integration tests (requires Postgres + Redis)"
+	@echo "  test-e2e           Self-provisioning Playwright E2E (services+seed+serve+run)"
 	@echo "  test-coverage      Generate HTML coverage report"
 	@echo "  lint               Run golangci-lint"
 	@echo "  lint-fix           Run golangci-lint with auto-fix"
