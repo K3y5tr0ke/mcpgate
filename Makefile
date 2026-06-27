@@ -23,7 +23,8 @@ BIN         := bin/mcpgate
         migrate-up migrate-down migrate-create \
         docker-up docker-down docker-up-examples \
         ci ci-fast ci-services \
-        seed seed-idp reset-audit-log seed-examples smoke-examples call-examples setup-dev stop clean install-hooks help
+        seed seed-idp reset-audit-log seed-examples smoke-examples call-examples \
+        load-test load-test-pipeline setup-dev stop clean install-hooks help
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -205,6 +206,22 @@ call-examples:
 	fi
 	MCPGATE_TOKEN=$(MCPGATE_TOKEN) bash examples/call-example-tools.sh
 
+# ── Load tests (k6) ────────────────────────────────────────────────────────────
+# Require k6 (brew install k6), MCPGATE_TOKEN, a running mcpgate, and a reachable
+# registered upstream (make docker-up-examples && make seed-examples). See k6/README.md.
+
+# 10.9 — proxy throughput: ramp 100→1000 req/s; asserts p95<50ms, p99<100ms, <1% errors.
+load-test:
+	@command -v k6 >/dev/null 2>&1 || { echo "k6 not found (brew install k6)."; exit 1; }
+	@if [ -z "$(MCPGATE_TOKEN)" ]; then echo "MCPGATE_TOKEN is required."; exit 1; fi
+	k6 run -e MCPGATE_TOKEN=$(MCPGATE_TOKEN) k6/proxy_throughput.js
+
+# 10.10 — audit-log pipeline under stress: 1000 req/s for 10m (~600k entries).
+load-test-pipeline:
+	@command -v k6 >/dev/null 2>&1 || { echo "k6 not found (brew install k6)."; exit 1; }
+	@if [ -z "$(MCPGATE_TOKEN)" ]; then echo "MCPGATE_TOKEN is required."; exit 1; fi
+	k6 run -e MCPGATE_TOKEN=$(MCPGATE_TOKEN) k6/log_pipeline.js
+
 # Full first-time dev environment setup.
 # Starts services, applies migrations, seeds DB + IdP, then starts servers.
 setup-dev:
@@ -282,6 +299,8 @@ help:
 	@echo "  seed-examples      Register example MCP servers via admin API (needs MCPGATE_TOKEN)"
 	@echo "  smoke-examples     Register + probe example MCP servers with tools/list (needs MCPGATE_TOKEN)"
 	@echo "  call-examples      Invoke tools/resources/prompts on each server via the proxy (needs MCPGATE_TOKEN)"
+	@echo "  load-test          k6 proxy throughput load test (needs k6 + MCPGATE_TOKEN)"
+	@echo "  load-test-pipeline k6 audit-log pipeline stress test (needs k6 + MCPGATE_TOKEN)"
 	@echo "  setup-dev          Full first-time setup: services + migrate + seed + seed-idp + start"
 	@echo "  stop               Kill the running mcpgate server (ports 8080 + 9090)"
 	@echo "  clean              Remove build artifacts"
