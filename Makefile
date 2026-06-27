@@ -127,7 +127,10 @@ docker-up:
 	docker compose -f deployments/docker/docker-compose.dev.yml up -d
 
 docker-down:
-	docker compose -f deployments/docker/docker-compose.dev.yml down -v
+	docker compose \
+	  -f deployments/docker/docker-compose.dev.yml \
+	  -f examples/docker-compose.examples.yml \
+	  down -v --remove-orphans
 
 # Start the dev stack plus the two containerised example MCP servers.
 # The example build contexts are ../.. (repo root) because Compose resolves
@@ -169,7 +172,7 @@ seed-examples:
 	  echo "MCPGATE_TOKEN is required."; \
 	  echo "Get one with: curl -s -X POST http://localhost:8080/auth/local/login \\"; \
 	  echo "  -H 'Content-Type: application/json' \\"; \
-	  echo "  -d '{\"email\":\"admin@mcpgate.local\",\"password\":\"<password>\"}' | jq -r .token"; \
+	  echo "  -d '{\"email\":\"admin@localhost\",\"password\":\"<password from make seed output>\"}' | jq -r .token"; \
 	  exit 1; \
 	fi
 	MCPGATE_TOKEN=$(MCPGATE_TOKEN) bash examples/seed-example-servers.sh
@@ -183,7 +186,7 @@ smoke-examples:
 	  echo "MCPGATE_TOKEN is required."; \
 	  echo "Get one with: curl -s -X POST http://localhost:8080/auth/local/login \\"; \
 	  echo "  -H 'Content-Type: application/json' \\"; \
-	  echo "  -d '{\"email\":\"admin@mcpgate.local\",\"password\":\"<password>\"}' | jq -r .token"; \
+	  echo "  -d '{\"email\":\"admin@localhost\",\"password\":\"<password from make seed output>\"}' | jq -r .token"; \
 	  exit 1; \
 	fi
 	MCPGATE_TOKEN=$(MCPGATE_TOKEN) bash examples/smoke-example-servers.sh
@@ -197,7 +200,7 @@ call-examples:
 	  echo "MCPGATE_TOKEN is required."; \
 	  echo "Get one with: curl -s -X POST http://localhost:8080/auth/local/login \\"; \
 	  echo "  -H 'Content-Type: application/json' \\"; \
-	  echo "  -d '{\"email\":\"admin@mcpgate.local\",\"password\":\"<password>\"}' | jq -r .token"; \
+	  echo "  -d '{\"email\":\"admin@localhost\",\"password\":\"<password from make seed output>\"}' | jq -r .token"; \
 	  exit 1; \
 	fi
 	MCPGATE_TOKEN=$(MCPGATE_TOKEN) bash examples/call-example-tools.sh
@@ -268,7 +271,7 @@ help:
 	@echo "  migrate-down       Roll back the last migration"
 	@echo "  migrate-create     Create a new migration (name=<suffix>)"
 	@echo "  docker-up          Start Postgres + Redis via docker compose"
-	@echo "  docker-down        Stop and remove Docker services"
+	@echo "  docker-down        Stop and remove Docker services + example containers if running"
 	@echo "  docker-up-examples Start dev stack + containerised example MCP servers"
 	@echo "  ci-fast            Lint + unit tests + build (no Docker, used by pre-push hook)"
 	@echo "  ci                 Full local CI pipeline (requires Docker)"

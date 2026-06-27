@@ -216,10 +216,10 @@ make ci-fast
 
 ### Running the example MCP servers
 
-The repo includes three example MCP servers (one per transport) for integration testing and local development.
+The repo includes three example MCP servers (one per transport) for integration testing and local development. Run these after `make setup-dev` has completed.
 
 ```bash
-# 1. Build the stdio binary (required for stdio registration)
+# 1. Build all three example binaries (required — stdio runs as a host process)
 make build-examples
 # → bin/mcp-streamable-example, bin/mcp-sse-example, bin/mcp-stdio-example
 
@@ -227,13 +227,24 @@ make build-examples
 make docker-up-examples
 # Adds mcp-streamable (:8081) and mcp-sse (:8082) to the running dev stack.
 
-# 3. Register all three servers in mcpgate via the admin API
-#    Requires a running mcpgate instance and a valid admin JWT.
+# 3. Get an admin JWT (password is printed by make seed)
 TOKEN=$(curl -s -X POST http://localhost:8080/auth/local/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@mcpgate.local","password":"<password>"}' | jq -r .token)
+  -d '{"email":"admin@localhost","password":"<password from make seed output>"}' \
+  | jq -r .token)
 
+# 4. Register all three servers in mcpgate via the admin API
 MCPGATE_TOKEN=$TOKEN make seed-examples
+
+# 5. Smoke test — probes all three transports end-to-end through the proxy
+#    Exits non-zero if any probe fails.
+MCPGATE_TOKEN=$TOKEN make smoke-examples
+```
+
+For an exploratory walkthrough that calls every tool, resource, and prompt on each registered server:
+
+```bash
+MCPGATE_TOKEN=$TOKEN make call-examples
 ```
 
 See [`examples/seed-example-servers.sh`](examples/seed-example-servers.sh) for `--upstream-host` options when mcpgate itself runs in a container.
@@ -368,9 +379,11 @@ The `.env` file is gitignored and holds local dev credentials only.
 |--------|-------------|
 | `make install-hooks` | Install the pre-push git hook (`scripts/pre-push.hook → .git/hooks/pre-push`) — run once after cloning |
 | `make docker-up` | Start all Docker services (Postgres, Redis, Prometheus, Grafana) |
-| `make docker-down` | Stop and remove all Docker services (destroys volumes) |
+| `make docker-down` | Stop and remove all Docker services including example containers if running (destroys volumes) |
 | `make docker-up-examples` | Start dev stack + containerised example MCP servers (Streamable HTTP + SSE) |
 | `make seed-examples` | Register example MCP servers via admin API (requires `MCPGATE_TOKEN`) |
+| `make smoke-examples` | Probe all three example transports end-to-end through the proxy (requires `MCPGATE_TOKEN`) |
+| `make call-examples` | Walk every registered server — invoke all tools, resources, and prompts (requires `MCPGATE_TOKEN`) |
 | `make stop` | Kill the running mcpgate server (ports 8080 + 9090) |
 | `make help` | Print all targets with descriptions |
 
