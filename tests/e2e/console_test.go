@@ -57,6 +57,61 @@ func TestE2E_Console_LoginPageServed(t *testing.T) {
 	}
 }
 
+// TestE2E_SecurityHeaders_OnConsoleAndAdmin verifies the securityHeaders
+// middleware is wired onto the browser-facing surfaces (console SPA + admin API)
+// and is NOT applied to the /mcp proxy path (whose responses pass through verbatim).
+func TestE2E_SecurityHeaders_OnConsoleAndAdmin(t *testing.T) {
+	ts := newTestServer(t)
+	adminToken := ts.createAdminToken(t)
+
+	wantHeaders := map[string]string{
+		"X-Frame-Options":           "DENY",
+		"X-Content-Type-Options":    "nosniff",
+		"Referrer-Policy":           "no-referrer",
+		"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+	}
+
+	assertSecure := func(t *testing.T, h http.Header) {
+		t.Helper()
+		for k, v := range wantHeaders {
+			if got := h.Get(k); got != v {
+				t.Errorf("%s = %q, want %q", k, got, v)
+			}
+		}
+		if csp := h.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
+			t.Errorf("CSP missing or weak: %q", csp)
+		}
+	}
+
+	t.Run("console", func(t *testing.T) {
+		resp, err := http.Get(ts.url + "/console/dashboard")
+		if err != nil {
+			t.Fatalf("GET console: %v", err)
+		}
+		defer resp.Body.Close() //nolint:errcheck
+		assertSecure(t, resp.Header)
+	})
+
+	t.Run("admin API", func(t *testing.T) {
+		resp := ts.do(t, http.MethodGet, "/api/v1/admin/servers", nil,
+			map[string]string{"Authorization": "Bearer " + adminToken})
+		defer resp.Body.Close() //nolint:errcheck
+		assertSecure(t, resp.Header)
+	})
+
+	t.Run("proxy path excluded", func(t *testing.T) {
+		// Unauthenticated → 401, but the point is the /mcp group has no
+		// securityHeaders middleware, so no CSP is added to proxy responses.
+		resp := ts.do(t, http.MethodPost, "/mcp/whatever/message",
+			newJSONReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)),
+			map[string]string{"Content-Type": "application/json"})
+		defer resp.Body.Close() //nolint:errcheck
+		if csp := resp.Header.Get("Content-Security-Policy"); csp != "" {
+			t.Errorf("proxy response should not carry CSP, got: %q", csp)
+		}
+	})
+}
+
 // TestE2E_Console_RootRedirectsToDashboard verifies that /console redirects to
 // /console/dashboard rather than returning 404 or a blank page.
 func TestE2E_Console_RootRedirectsToDashboard(t *testing.T) {
