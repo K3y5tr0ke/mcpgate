@@ -71,3 +71,8 @@ formatters:
 run:
   timeout: 5m
   go: "1.26"
+  # Lint integration-tagged files too (tests/e2e/*, internal/*_test with the
+  # integration tag). Without this, lint silently skips them and nits accumulate
+  # invisibly to the gate.
+  build-tags:
+    - integration

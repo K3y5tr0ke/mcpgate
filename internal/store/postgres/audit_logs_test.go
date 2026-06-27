@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	pgstore "github.com/K3y5tr0ke/mcpgate/internal/store/postgres"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
+	pgstore "github.com/K3y5tr0ke/mcpgate/internal/store/postgres"
 	"github.com/K3y5tr0ke/mcpgate/internal/testutil"
 )
 
