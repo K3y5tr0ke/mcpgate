@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"github.com/K3y5tr0ke/mcpgate/internal/config"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
@@ -21,12 +22,13 @@ import (
 // The current handler validates the session only at upgrade time (auth
 // middleware), so a session revoked AFTER the socket is open stays connected.
 // This test documents the intended behaviour: a periodic re-validation should
-// detect the revoked session and close the socket. It is skipped until that
-// heartbeat lands (Sprint 10); remove the t.Skip when implemented.
+// detect the revoked session and close the socket. The handler now runs a
+// re-validation heartbeat (internal/admin/api/logs.go); this test exercises it
+// with a short interval.
 func TestWebSocket_SessionRevoked_ConnectionClosed(t *testing.T) {
-	t.Skip("session re-validation heartbeat not yet implemented — Sprint 10")
-
-	ts := newTestServer(t)
+	ts := newTestServerWith(t, func(cfg *config.Config) {
+		cfg.Auth.SessionRevalidateInterval = 1 * time.Second
+	})
 	ctx := context.Background()
 
 	// 1. Issue a real admin JWT + live session and capture the session ID so we
@@ -58,7 +60,10 @@ func TestWebSocket_SessionRevoked_ConnectionClosed(t *testing.T) {
 	// 2. Open the WebSocket with the session cookie.
 	wsURL := "ws" + strings.TrimPrefix(ts.url, "http") + "/api/v1/admin/logs/stream"
 	header := http.Header{"Cookie": {"mcpgate_session=" + token}}
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	conn, dialResp, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if dialResp != nil {
+		_ = dialResp.Body.Close()
+	}
 	if err != nil {
 		t.Fatalf("ws dial: %v", err)
 	}
@@ -74,8 +79,8 @@ func TestWebSocket_SessionRevoked_ConnectionClosed(t *testing.T) {
 		t.Fatalf("delete session: %v", err)
 	}
 
-	// 5. Within the re-validation interval, the server should close the socket.
-	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+	// 5. Within a couple of re-validation intervals, the server should close the socket.
+	_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			return // connection closed as expected

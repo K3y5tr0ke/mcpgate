@@ -281,7 +281,8 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 		adminRouter: api.NewRouter(
 			serverStore, samlIDPStore, jwksStore, jwksValidator, roleStore, overrideStore, userStore,
 			auditStore, settingsStore, pipeline, enforcer,
-			proxyHandler, collector, db, redisClient, logger,
+			proxyHandler, collector, db, redisClient,
+			sessionCache, cfg.Auth.SessionRevalidateInterval, logger,
 		),
 		samlHandlers:     samlHandlers,
 		localHandlers:    localHandlers,

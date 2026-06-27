@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -10,14 +11,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"github.com/K3y5tr0ke/mcpgate/internal/auth"
 	"github.com/K3y5tr0ke/mcpgate/internal/logging"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
 type logHandler struct {
-	store    store.AuditLogStore
-	pipeline *logging.Pipeline
-	logger   *slog.Logger
+	store        store.AuditLogStore
+	pipeline     *logging.Pipeline
+	sessionCache store.SessionCache
+	revalidate   time.Duration // how often the WS stream re-checks session liveness
+	logger       *slog.Logger
 }
 
 var wsUpgrader = websocket.Upgrader{
@@ -143,6 +147,41 @@ func (h *logHandler) stream(w http.ResponseWriter, r *http.Request) {
 	connID := uuid.New().String()
 	ch, cancel := h.pipeline.Subscribe(connID, 256)
 	defer cancel()
+
+	// Session re-validation heartbeat: the auth middleware only runs at upgrade,
+	// so a session revoked while the socket is open would otherwise stay
+	// connected. Periodically re-check liveness (the same sessionCache.Get the
+	// auth middleware uses) and close the socket if the session is gone. M2M
+	// tokens have no session (SessionID == Nil) and are skipped.
+	if identity := auth.IdentityFromContextOrZero(r.Context()); identity.SessionID != uuid.Nil && h.sessionCache != nil {
+		interval := h.revalidate
+		if interval <= 0 {
+			interval = 30 * time.Second
+		}
+		done := make(chan struct{})
+		defer close(done)
+		//nolint:gosec // G118: deliberately not the request context — it is
+		// canceled by the WebSocket hijack, which would falsely read as revocation.
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					// Use a background context — the request context may be
+					// canceled by the WS hijack, which must not read as revocation.
+					if _, err := h.sessionCache.Get(context.Background(), identity.SessionID); err != nil {
+						h.logger.Info("ws: session revoked mid-stream, closing", "session_id", identity.SessionID)
+						cancel()
+						_ = conn.Close()
+						return
+					}
+				}
+			}
+		}()
+	}
 
 	var filter store.LogFilter
 

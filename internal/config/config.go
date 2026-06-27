@@ -69,6 +69,10 @@ type AuthConfig struct {
 	JWT            JWTConfig        `koanf:"jwt"`
 	M2M            M2MConfig        `koanf:"m2m"`
 	BruteForce     BruteForceConfig `koanf:"brute_force"`
+	// SessionRevalidateInterval is how often a long-lived WebSocket (the audit
+	// log stream) re-checks that its session is still live, so a revoked session
+	// is disconnected mid-stream rather than only at upgrade. Default 30s.
+	SessionRevalidateInterval time.Duration `koanf:"session_revalidate_interval"`
 }
 
 type M2MConfig struct {
@@ -221,8 +225,9 @@ func defaults() *Config {
 			PoolSize: 20,
 		},
 		Auth: AuthConfig{
-			SessionTTL:     time.Hour,
-			SessionSliding: true,
+			SessionTTL:                time.Hour,
+			SessionSliding:            true,
+			SessionRevalidateInterval: 30 * time.Second,
 			JWT: JWTConfig{
 				Issuer:          "mcpgate",
 				AccessTokenTTL:  15 * time.Minute,

@@ -37,6 +37,9 @@ redis:
 auth:
   session_ttl: 1h
   session_sliding: true        # extend TTL on each authenticated request
+  session_revalidate_interval: 30s  # how often the audit-log WebSocket re-checks
+                                     # session liveness so a revoked session is
+                                     # disconnected mid-stream (0 = default 30s)
   jwt:
     issuer: "mcpgate"
     access_token_ttl: 15m
