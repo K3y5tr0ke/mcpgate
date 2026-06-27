@@ -309,6 +309,41 @@ func TestE2E_RBAC_AdminAPI_NonAdminRole_Returns403(t *testing.T) {
 	}
 }
 
+// TestE2E_RBAC_AdminAPI_NonAdmin_CannotMutate verifies that a non-admin role is
+// blocked from *writing* admin resources, not just reading them. RequireRole
+// gates the whole admin group regardless of method, so create/update/delete on
+// servers and policies must all return 403 — the privilege-escalation vector
+// that a read-only denial test would miss.
+func TestE2E_RBAC_AdminAPI_NonAdmin_CannotMutate(t *testing.T) {
+	ts := newTestServer(t)
+	devToken := ts.createTokenWithRoles(t, []string{"developer"})
+	hdr := map[string]string{"Authorization": "Bearer " + devToken, "Content-Type": "application/json"}
+
+	cases := []struct {
+		name, method, path, body string
+	}{
+		{"create server", http.MethodPost, "/api/v1/admin/servers",
+			`{"name":"evil","transport":"http","config":{"url":"http://x"}}`},
+		{"create policy", http.MethodPost, "/api/v1/admin/policies",
+			`{"subject":"developer","resource":"*","action":"*"}`},
+		{"delete server", http.MethodDelete, "/api/v1/admin/servers/" + uuid.New().String(), ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var body io.Reader
+			if c.body != "" {
+				body = bytes.NewReader([]byte(c.body))
+			}
+			resp := ts.do(t, c.method, c.path, body, hdr)
+			defer resp.Body.Close() //nolint:errcheck
+			if resp.StatusCode != http.StatusForbidden {
+				b, _ := io.ReadAll(resp.Body)
+				t.Errorf("%s %s: want 403, got %d: %s", c.method, c.path, resp.StatusCode, b)
+			}
+		})
+	}
+}
+
 // TestE2E_RBAC_AdminAPI_AdminRole_Allowed verifies that admin tokens can still
 // reach all admin API routes after RequireRole is wired.
 func TestE2E_RBAC_AdminAPI_AdminRole_Allowed(t *testing.T) {
