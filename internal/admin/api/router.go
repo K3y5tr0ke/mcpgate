@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -33,6 +34,8 @@ type Router struct {
 	collector     metricsProvider
 	db            *pgxpool.Pool
 	redis         *goredis.Client
+	sessionCache  store.SessionCache
+	revalidate    time.Duration
 	logger        *slog.Logger
 }
 
@@ -53,6 +56,8 @@ func NewRouter(
 	collector metricsProvider,
 	db *pgxpool.Pool,
 	redis *goredis.Client,
+	sessionCache store.SessionCache,
+	revalidate time.Duration,
 	logger *slog.Logger,
 ) *Router {
 	return &Router{
@@ -71,6 +76,8 @@ func NewRouter(
 		collector:     collector,
 		db:            db,
 		redis:         redis,
+		sessionCache:  sessionCache,
+		revalidate:    revalidate,
 		logger:        logger,
 	}
 }
@@ -85,7 +92,7 @@ func (rt *Router) Handler() http.Handler {
 	rh := &roleHandler{store: rt.roles, overrides: rt.overrides, logger: rt.logger}
 	uh := &userHandler{store: rt.users, logger: rt.logger}
 	ph := &policyHandler{enforcer: rt.enforcer, logger: rt.logger}
-	lh := &logHandler{store: rt.auditStore, pipeline: rt.pipeline, logger: rt.logger}
+	lh := &logHandler{store: rt.auditStore, pipeline: rt.pipeline, sessionCache: rt.sessionCache, revalidate: rt.revalidate, logger: rt.logger}
 	mh := &metricsHandler{collector: rt.collector, proxyHandler: rt.proxyHandler, db: rt.db, redis: rt.redis, logger: rt.logger}
 	sth := &settingsHandler{store: rt.settings, logger: rt.logger}
 
