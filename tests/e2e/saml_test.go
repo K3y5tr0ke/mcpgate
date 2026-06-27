@@ -115,7 +115,7 @@ func TestE2E_SAML_CookieAuth_ProtectedRoute(t *testing.T) {
 		t.Fatal("no mcpgate_session cookie after ACS")
 	}
 
-	req, err := http.NewRequest(http.MethodGet, ts.url+"/api/v1/me", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.url+"/api/v1/me", http.NoBody)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}

@@ -12,10 +12,10 @@ import (
 
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
 	"github.com/K3y5tr0ke/mcpgate/internal/server"
+	"github.com/K3y5tr0ke/mcpgate/internal/store"
 	pgstore "github.com/K3y5tr0ke/mcpgate/internal/store/postgres"
 	redisstore "github.com/K3y5tr0ke/mcpgate/internal/store/redis"
 	"github.com/K3y5tr0ke/mcpgate/internal/testutil"
-	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
 // testServer wraps a real server.Server running inside an httptest.Server.
