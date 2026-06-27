@@ -11,6 +11,35 @@
 
 ---
 
+## 0. Progress (updated 2026-06-27)
+
+Work lands on branch `sprint-10-hardening-security` (draft PR #7).
+
+| Task | Status | Commit / note |
+|------|--------|---------------|
+| 10.1 OWASP checklist | ✅ done | `docs/security-owasp.md` |
+| 10.2 Security headers | ✅ done | `securityHeaders` middleware + unit/e2e tests |
+| 10.4 SQL-injection suite | ✅ done | `tests/e2e/sqli_test.go` |
+| 10.6 JWT security | ✅ done | alg-confusion (`none`/HS256) + role-tamper |
+| 10.7 SAML security | ✅ done | tampered-assertion (signature) rejection |
+| 10.8 Privilege escalation | ✅ done | non-admin cannot read/mutate admin API |
+| 10.9 / 10.10 k6 load | ✅ scripts authored | `k6/`, `make load-test[-pipeline]` (run needs k6 + stack) |
+| 10.13 upstream chaos | ✅ done | breaker open **and** recovery cycle |
+| 10.11 / 10.12 PG/Redis chaos | ✅ logic unit-covered | WAL fallback + rate-limit fail-open; container-kill e2e deferred |
+| 10.14 dependency scan | ✅ govulncheck + npm audit | Trivy image scan → Sprint 11 |
+| S4-T1 RBAC unit tests | ✅ done | Casbin model + `RequireRole` |
+| S9-D3 WS heartbeat | ✅ done | session re-validation on the log stream |
+| **Lint gate hardening** | ✅ done | `.golangci.yml` now lints `-tags=integration` |
+| 10.3 ZAP scan | ⏳ todo | external scanner |
+| 10.5 XSS | 🟡 partial | React auto-escaping + CSP (10.2); full verify needs Playwright |
+| S9-D7 Playwright-in-CI | ⏳ in progress | provisioning orchestration |
+| S9-D5 axe-core | ⏳ todo | blocked on S9-D7 |
+| 10.15 Docker hardening | ⏭ Sprint 11 | no prod Dockerfile yet |
+
+**Substantive code/test work for the sprint is essentially complete.** Remaining items are external-tooling integration (ZAP, Trivy) and CI/infra (Playwright-in-CI → unblocks axe-core).
+
+---
+
 ## 1. Reconciliation against current code
 
 The carry-over harvest surfaced several items already resolved in later sprints. Corrected against the current tree:
