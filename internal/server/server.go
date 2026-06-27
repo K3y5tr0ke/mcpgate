@@ -304,12 +304,15 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 	}
 
 	s.http = &http.Server{
-		Addr:           fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:        s.buildRouter(),
-		ReadTimeout:    cfg.Server.ReadTimeout,
-		WriteTimeout:   cfg.Server.WriteTimeout,
-		IdleTimeout:    cfg.Server.IdleTimeout,
-		MaxHeaderBytes: cfg.Server.MaxHeaderBytes,
+		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler: s.buildRouter(),
+		// Bounds the time to read request headers — defends against slow-header
+		// (slowloris) clients independently of the full-request ReadTimeout.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+		WriteTimeout:      cfg.Server.WriteTimeout,
+		IdleTimeout:       cfg.Server.IdleTimeout,
+		MaxHeaderBytes:    cfg.Server.MaxHeaderBytes,
 	}
 
 	return s, nil

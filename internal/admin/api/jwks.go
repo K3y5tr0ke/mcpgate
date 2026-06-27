@@ -168,8 +168,14 @@ func (h *jwksHandler) rotate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// jwksRotateClient bounds the rotate endpoint's outbound fetch.
-var jwksRotateClient = &http.Client{Timeout: 10 * time.Second}
+// jwksRotateClient bounds the rotate endpoint's outbound fetch and refuses to
+// follow redirects (a JWKS URL must not 3xx-pivot to an internal address — SSRF).
+var jwksRotateClient = &http.Client{
+	Timeout: 10 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
 // fetchJWKSKeyCount GETs a JWKS URL and returns the number of keys it advertises.
 // Returns an error if the endpoint is unreachable, returns a non-200, is not valid
