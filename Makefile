@@ -45,7 +45,19 @@ build-examples:
 
 # ── Development ───────────────────────────────────────────────────────────────
 
+# configs/mcpgate.dev.yaml is gitignored (local, may hold secrets). Guard targets
+# that need it with a clear message instead of a cryptic "file not found".
+define REQUIRE_DEV_CONFIG
+	@test -f configs/mcpgate.dev.yaml || { \
+	  echo "configs/mcpgate.dev.yaml not found (it is gitignored)."; \
+	  echo "First-time setup: run 'bash scripts/setup.sh', or create it manually:"; \
+	  echo "  cp configs/mcpgate.example.yaml configs/mcpgate.dev.yaml"; \
+	  echo "  then set database.password: devpassword and ssl_mode: disable (docker dev stack)."; \
+	  exit 1; }
+endef
+
 dev:
+	$(REQUIRE_DEV_CONFIG)
 	$(GVM_GO) run ./cmd/mcpgate serve --config configs/mcpgate.dev.yaml
 
 dev-frontend:
@@ -144,6 +156,7 @@ docker-up-examples:
 # ── Seed ─────────────────────────────────────────────────────────────────────
 
 seed:
+	$(REQUIRE_DEV_CONFIG)
 	$(GVM_GO) run ./cmd/mcpgate seed --config configs/mcpgate.dev.yaml
 
 # Upsert the Auth0 dev SAML IdP config into saml_idp_configs.

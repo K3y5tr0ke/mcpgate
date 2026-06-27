@@ -80,6 +80,26 @@ DATABASE_URL="postgres://mcpgate:devpassword@localhost:5432/mcpgate?sslmode=disa
 migrate -path internal/store/postgres/migrations -database "$DATABASE_URL" up
 info "Migrations applied"
 
+# ── Dev config ────────────────────────────────────────────────────────────────
+# mcpgate.dev.yaml is gitignored (it may hold local secrets), so derive it from
+# the committed example on first setup and point it at the docker dev stack.
+
+DEV_CFG="configs/mcpgate.dev.yaml"
+if [ -f "$DEV_CFG" ]; then
+    info "$DEV_CFG already exists — leaving it as-is"
+else
+    info "Creating $DEV_CFG from mcpgate.example.yaml..."
+    cp configs/mcpgate.example.yaml "$DEV_CFG"
+    # Match the docker-compose dev Postgres (devpassword is the public dev
+    # password from docker-compose.dev.yml; TLS disabled for the local container).
+    sed -i.bak \
+        -e '/^database:/,/^[a-zA-Z]/ s/password: ""/password: "devpassword"/' \
+        -e '/^database:/,/^[a-zA-Z]/ s/ssl_mode: "prefer"/ssl_mode: "disable"/' \
+        "$DEV_CFG"
+    rm -f "$DEV_CFG.bak"
+    info "  $DEV_CFG created (gitignored) — adjust for your environment"
+fi
+
 # ── Dev certificates ──────────────────────────────────────────────────────────
 
 info "Generating dev TLS and SAML certificates..."
