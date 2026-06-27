@@ -5,8 +5,10 @@ package e2e_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -247,6 +249,44 @@ func TestE2E_SAML_ReplayDetection_Returns400(t *testing.T) {
 
 	if resp2.StatusCode != http.StatusBadRequest {
 		t.Errorf("replay: want 400, got %d", resp2.StatusCode)
+	}
+}
+
+// TestE2E_SAML_TamperedAssertion_Rejected verifies that an assertion whose
+// signed content is modified after signing is rejected (the SAML signature check
+// fails). It builds a valid response, alters the Subject NameID in the decoded
+// XML — invalidating the signature digest — and asserts the ACS rejects it
+// rather than provisioning the attacker-controlled identity.
+//
+// (Audience and time-condition validation are enforced by the crewjam/saml
+// library during ParseResponse; this test covers the signature path, which is
+// the assertion-forgery vector mcpgate most depends on.)
+func TestE2E_SAML_TamperedAssertion_Rejected(t *testing.T) {
+	ts := newTestServer(t)
+
+	idp := ts.setupSyntheticIdP(t)
+	const origSubject = "tamper-subject-AAAA"
+	samlResp := ts.buildSAMLResponse(t, idp.idp, "tamper@example.com", origSubject)
+
+	raw, err := base64.StdEncoding.DecodeString(samlResp)
+	if err != nil {
+		t.Fatalf("decode SAMLResponse: %v", err)
+	}
+	tampered := strings.Replace(string(raw), origSubject, "tamper-subject-EVIL", 1)
+	if tampered == string(raw) {
+		t.Fatal("tamper no-op: subject marker not found in assertion XML")
+	}
+	badResp := base64.StdEncoding.EncodeToString([]byte(tampered))
+
+	resp := ts.postACS(t, badResp)
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode == http.StatusFound {
+		t.Fatal("tampered assertion was accepted (302) — signature not verified")
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("tampered assertion: want 400, got %d: %s", resp.StatusCode, body)
 	}
 }
 
