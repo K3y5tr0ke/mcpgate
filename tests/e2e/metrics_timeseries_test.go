@@ -149,3 +149,66 @@ func TestE2E_MetricsAPI_TimeseriesPerServer(t *testing.T) {
 		t.Errorf("idle server: got %d requests, want 0", idleTotal)
 	}
 }
+
+// seriesTotal sums the request counts across every bucket in a timeseries.
+func seriesTotal(s timeseriesResp) int64 {
+	var total int64
+	for _, b := range s.Buckets {
+		total += b.Requests
+	}
+	return total
+}
+
+// TestE2E_MetricsAPI_TimeseriesPerServerIsolation drives *different* request
+// volumes through two distinct registered servers and asserts each per-server
+// series reflects exactly its own traffic — neither leaks into the other. This
+// is the property the per-server drilldown relies on: a key-prefix bug that
+// counted one server's requests under another would still pass the single-server
+// test above but must fail here.
+func TestE2E_MetricsAPI_TimeseriesPerServerIsolation(t *testing.T) {
+	ts := newTestServer(t)
+
+	mockA := testutil.NewMockMCPServer()
+	t.Cleanup(mockA.Close)
+	mockB := testutil.NewMockMCPServer()
+	t.Cleanup(mockB.Close)
+
+	adminToken := ts.createAdminToken(t)
+	ts.registerMCPServer(t, adminToken, "iso-a", mockA.URL())
+	ts.registerMCPServer(t, adminToken, "iso-b", mockB.URL())
+
+	// Distinct, non-equal volumes so differentiation (not just isolation) is asserted.
+	const reqA, reqB = 4, 2
+	send := func(server string, n int) {
+		for i := 0; i < n; i++ {
+			resp := ts.do(t, http.MethodPost, "/mcp/"+server+"/message",
+				bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)),
+				map[string]string{
+					"Content-Type":  "application/json",
+					"Authorization": "Bearer " + adminToken,
+				},
+			)
+			resp.Body.Close() //nolint:errcheck
+		}
+	}
+	send("iso-a", reqA)
+	send("iso-b", reqB)
+
+	totalA := seriesTotal(getTimeseries(t, ts, adminToken, "?window=1h&server=iso-a"))
+	totalB := seriesTotal(getTimeseries(t, ts, adminToken, "?window=1h&server=iso-b"))
+
+	if totalA != reqA {
+		t.Errorf("iso-a: got %d requests, want %d (leakage or miscount)", totalA, reqA)
+	}
+	if totalB != reqB {
+		t.Errorf("iso-b: got %d requests, want %d (leakage or miscount)", totalB, reqB)
+	}
+	if totalA == totalB {
+		t.Errorf("expected the two per-server series to differ (a=%d, b=%d)", totalA, totalB)
+	}
+
+	// The global series should account for at least both servers' traffic combined.
+	if global := seriesTotal(getTimeseries(t, ts, adminToken, "?window=1h")); global < reqA+reqB {
+		t.Errorf("global series: got %d requests, want ≥ %d", global, reqA+reqB)
+	}
+}

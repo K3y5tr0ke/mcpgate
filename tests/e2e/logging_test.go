@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,6 +200,85 @@ func TestE2E_AuditLog_AdminAPI_ListLogs(t *testing.T) {
 	}
 	if _, ok := result["entries"]; !ok {
 		t.Error("response missing 'entries' field")
+	}
+}
+
+// TestE2E_AuditLog_AdminAPI_EntryJSONIsSnakeCase is a regression test for the
+// console outage caused by store.AuditLogEntry missing json tags: the
+// GET /api/v1/admin/logs response serialised PascalCase keys (Timestamp,
+// UserEmail, …) while the SPA expected snake_case, so the dashboard read an
+// undefined timestamp and crashed with "Invalid time value". This test drives a
+// real proxied request, then asserts the API response uses snake_case keys and
+// returns a non-empty, parseable timestamp — i.e. the shape the console relies on.
+func TestE2E_AuditLog_AdminAPI_EntryJSONIsSnakeCase(t *testing.T) {
+	ts := newTestServer(t)
+	adminToken := ts.createAdminToken(t)
+
+	serverName := "audit-json-" + uuid.New().String()[:8]
+	createJSON, _ := json.Marshal(map[string]any{
+		"name":       serverName,
+		"transport":  "http",
+		"is_enabled": true,
+		"config":     map[string]any{"url": "http://127.0.0.1:1"},
+	})
+	createResp := ts.do(t, http.MethodPost, "/api/v1/admin/servers", newJSONReader(createJSON),
+		map[string]string{"Authorization": "Bearer " + adminToken, "Content-Type": "application/json"})
+	createResp.Body.Close() //nolint:errcheck
+
+	// Drive a proxied request so an audit entry is written (upstream failure is fine).
+	proxyResp := ts.do(t, http.MethodPost, "/mcp/"+serverName+"/message",
+		newJSONReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)),
+		map[string]string{"Authorization": "Bearer " + adminToken, "Content-Type": "application/json"})
+	proxyResp.Body.Close() //nolint:errcheck
+
+	// Ensure the entry has been persisted before querying the API.
+	waitForAuditEntries(t, ts, store.LogFilter{MCPMethod: "tools/list"}, 1, 2*time.Second)
+
+	resp := ts.do(t, http.MethodGet, "/api/v1/admin/logs?page_size=50", nil,
+		map[string]string{"Authorization": "Bearer " + adminToken})
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET logs: want 200, got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	raw := string(body)
+
+	// Direct guard against the PascalCase regression that caused the outage.
+	for _, snake := range []string{`"timestamp"`, `"user_email"`, `"server_name"`, `"status"`} {
+		if !strings.Contains(raw, snake) {
+			t.Errorf("response missing snake_case key %s — got: %s", snake, raw)
+		}
+	}
+	for _, pascal := range []string{`"Timestamp"`, `"UserEmail"`, `"ServerName"`} {
+		if strings.Contains(raw, pascal) {
+			t.Errorf("response contains PascalCase key %s (json tags missing on AuditLogEntry?)", pascal)
+		}
+	}
+
+	// The console calls new Date(entry.timestamp); assert it's present and parseable.
+	var payload struct {
+		Entries []struct {
+			Timestamp  string `json:"timestamp"`
+			UserEmail  string `json:"user_email"`
+			ServerName string `json:"server_name"`
+			Status     string `json:"status"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode entries: %v", err)
+	}
+	if len(payload.Entries) == 0 {
+		t.Fatal("no entries returned")
+	}
+	e := payload.Entries[0]
+	if e.Timestamp == "" {
+		t.Fatal("entry timestamp is empty — console would render Invalid Date")
+	}
+	if _, err := time.Parse(time.RFC3339, e.Timestamp); err != nil {
+		t.Errorf("entry timestamp %q is not RFC3339-parseable: %v", e.Timestamp, err)
 	}
 }
 
