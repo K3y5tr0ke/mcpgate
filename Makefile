@@ -271,7 +271,7 @@ help:
 	@echo "  test-coverage      Generate HTML coverage report"
 	@echo "  lint               Run golangci-lint"
 	@echo "  lint-fix           Run golangci-lint with auto-fix"
-	@echo "  security-scan      Run govulncheck"
+	@echo "  security-scan      Run govulncheck (Go) + npm audit (frontend)"
 	@echo "  migrate-up         Apply all pending migrations"
 	@echo "  migrate-down       Roll back the last migration"
 	@echo "  migrate-create     Create a new migration (name=<suffix>)"
