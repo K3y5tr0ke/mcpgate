@@ -366,8 +366,10 @@ func (s *Server) buildRouter() http.Handler {
 		r.Post("/sse", s.proxyHandler.HandleSSEMessage)
 	})
 
-	// Admin REST API — auth then admin role check (no Casbin).
+	// Admin REST API — security headers → auth → admin role check (no Casbin).
+	// securityHeaders runs first so even 401/403 responses carry the headers.
 	r.Group(func(r chi.Router) {
+		r.Use(securityHeaders)
 		r.Use(s.authMiddleware)
 		r.Use(rbac.RequireRole("admin", s.logger))
 		r.Mount("/api/v1/admin", s.adminRouter.Handler())
@@ -378,9 +380,9 @@ func (s *Server) buildRouter() http.Handler {
 	// The SPA itself redirects unauthenticated users to /auth/saml/login.
 	// r.Mount strips the /console prefix before the handler sees r.URL.Path,
 	// so consoleSPAHandler receives "/dashboard", "/assets/…", etc.
-	r.Mount("/console", consoleSPAHandler())
+	r.With(securityHeaders).Mount("/console", consoleSPAHandler())
 	// Redirect bare /console to /console/dashboard.
-	r.Get("/console", func(w http.ResponseWriter, r *http.Request) {
+	r.With(securityHeaders).Get("/console", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/console/dashboard", http.StatusFound)
 	})
 
