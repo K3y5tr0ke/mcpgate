@@ -20,4 +20,8 @@ cd "$REPO_ROOT"
 echo "[pre-push] Running ci-fast (lint + unit tests + build)..."
 make ci-fast
 
+# Non-blocking reminder: warn if gitignored secret files drifted from the
+# password manager (does not fail the push).
+make secrets-check || true
+
 echo "[pre-push] Passed. Tip: run 'make ci' for the full integration suite before merging."

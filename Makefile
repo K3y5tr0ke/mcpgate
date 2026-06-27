@@ -23,7 +23,8 @@ BIN         := bin/mcpgate
         migrate-up migrate-down migrate-create \
         docker-up docker-down docker-up-examples \
         ci ci-fast ci-services \
-        seed seed-idp reset-audit-log seed-examples smoke-examples call-examples setup-dev stop clean install-hooks help
+        seed seed-idp reset-audit-log seed-examples smoke-examples call-examples \
+        secrets-check secrets-synced setup-dev stop clean install-hooks help
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -164,6 +165,16 @@ seed:
 seed-idp:
 	psql "$(DATABASE_URL)" -f scripts/seed_auth0_idp.sql
 
+# ── Local secrets sync (drift reminder) ─────────────────────────────────────────
+# .env and configs/mcpgate.dev.yaml are gitignored and must be kept in your
+# password manager manually. These targets nag (checksum-based) when they drift;
+# they never block. After updating your PM, run `make secrets-synced`.
+secrets-check:
+	@bash scripts/secrets-sync.sh check
+
+secrets-synced:
+	@bash scripts/secrets-sync.sh mark
+
 # DEV ONLY. Truncate the audit_logs table so the tamper-evident hash chain
 # restarts from a clean seed. Needed once after the audit-log json-tag fix
 # (the hash input representation changed, so entries written before the fix
@@ -291,6 +302,8 @@ help:
 	@echo "  install-hooks      Install git pre-push hook"
 	@echo "  seed               Seed database with default roles and admin user"
 	@echo "  seed-idp           Upsert Auth0 dev SAML IdP config into Postgres"
+	@echo "  secrets-check      Warn if .env / mcpgate.dev.yaml drifted from your password manager"
+	@echo "  secrets-synced     Record current secret-file checksums (after updating your PM)"
 	@echo "  reset-audit-log    DEV: truncate audit_logs to reseed the hash chain"
 	@echo "  seed-examples      Register example MCP servers via admin API (needs MCPGATE_TOKEN)"
 	@echo "  smoke-examples     Register + probe example MCP servers with tools/list (needs MCPGATE_TOKEN)"

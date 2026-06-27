@@ -30,3 +30,4 @@ Thumbs.db
 # WAL fallback files
 wal/
 configs/mcpgate.dev.yaml
+.secrets-sync
