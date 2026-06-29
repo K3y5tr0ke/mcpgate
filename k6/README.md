@@ -11,6 +11,11 @@ Sprint 10 performance validation (tasks 10.9 / 10.10). Uses [Grafana k6](https:/
   ```
 - An admin JWT in `MCPGATE_TOKEN` (from `/auth/local/login`).
 
+> **Use a fast, local upstream.** The `p95<50ms / p99<100ms` thresholds are
+> *end-to-end* (proxy **+** upstream + network). A slow or remote example server
+> will fail the gate for reasons unrelated to mcpgate's own overhead. Point
+> `MCP_SERVER` at a local, near-instant upstream when validating proxy latency.
+
 ## Run
 
 ```bash

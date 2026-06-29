@@ -15,8 +15,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-GVM_GO="${GVM_GO:-$HOME/.gvm/gos/go1.26.4/bin/go}"
-export GOROOT="${GOROOT:-$HOME/.gvm/gos/go1.26.4}"
+# Keep in sync with the Makefile's GO_VERSION (single literal here, derived below).
+GO_VERSION="${GO_VERSION:-go1.26.4}"
+GVM_GO="${GVM_GO:-$HOME/.gvm/gos/$GO_VERSION/bin/go}"
+export GOROOT="${GOROOT:-$HOME/.gvm/gos/$GO_VERSION}"
 BASE_URL="${PLAYWRIGHT_BASE_URL:-http://localhost:8080}"
 DATABASE_URL="${DATABASE_URL:-postgres://mcpgate:devpassword@localhost:5432/mcpgate?sslmode=disable}"
 CONFIG="configs/mcpgate.dev.yaml"
