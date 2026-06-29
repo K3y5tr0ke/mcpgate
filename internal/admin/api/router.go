@@ -87,9 +87,25 @@ func NewRouter(d Deps) *Router {
 	}
 }
 
+// maxAdminBodyBytes caps admin request bodies. Handlers decode JSON without their
+// own limit, so this guards against memory-exhaustion from oversized payloads.
+const maxAdminBodyBytes = 1 << 20 // 1 MiB
+
+// limitBody wraps each request body in a MaxBytesReader so an oversized payload
+// fails the handler's Decode (→ 400) instead of being buffered in full.
+func limitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxAdminBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Handler returns the chi http.Handler for all /api/v1/admin routes.
 func (rt *Router) Handler() http.Handler {
 	r := chi.NewRouter()
+	r.Use(limitBody)
 
 	sh := &serverHandler{servers: rt.servers, proxyHandler: rt.proxyHandler, logger: rt.logger}
 	ih := &idpHandler{idps: rt.idps, logger: rt.logger}

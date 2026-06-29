@@ -55,8 +55,11 @@ func Authorize(enforcer *Enforcer, logger *slog.Logger) func(http.Handler) http.
 
 			allowed, err := enforcer.Enforce(r.Context(), identity.Roles, serverName, action)
 			if err != nil {
-				logger.Error("rbac: enforce error", "server", serverName, "action", action, "err", err)
-				allowed = enforcer.DefaultAllow()
+				// Fail CLOSED on enforcement error (e.g. policy store unreachable):
+				// a transient failure must never grant access, regardless of the
+				// configured default action.
+				logger.Error("rbac: enforce error — denying", "server", serverName, "action", action, "err", err)
+				allowed = false
 			}
 
 			if !allowed {

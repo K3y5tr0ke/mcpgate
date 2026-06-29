@@ -129,8 +129,13 @@ type HealthCheckConfig struct {
 }
 
 type RBACConfig struct {
-	CacheTTL      time.Duration `koanf:"cache_ttl"`
-	DefaultAction string        `koanf:"default_action"`
+	CacheTTL time.Duration `koanf:"cache_ttl"`
+	// DefaultAction documents the intended posture only. Enforcement is
+	// unconditionally deny-by-default: the Casbin model denies any request with
+	// no matching allow policy, and the middleware fails closed on enforcer
+	// errors. "allow" is accepted for backward-compat but is NOT honoured — set
+	// explicit policies instead. Validation still restricts it to deny|allow.
+	DefaultAction string `koanf:"default_action"`
 }
 
 type LoggingConfig struct {

@@ -102,6 +102,64 @@ func TestValidator_Integration_EndToEnd(t *testing.T) {
 	}
 }
 
+// TestValidator_Integration_MissingSubject_Rejected verifies that an otherwise
+// valid M2M token with no `sub` claim is rejected: the subject is the client's
+// only stable identity (audit log + per-client rate-limit key), so a sub-less
+// token must not be accepted into a shared identity.
+func TestValidator_Integration_MissingSubject_Rejected(t *testing.T) {
+	db := testutil.NewPostgresPool(t, pgstore.Migrations)
+	jwksStore := pgstore.NewJWKSConfigStore(db)
+	ctx := context.Background()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		eBytes := big.NewInt(int64(key.PublicKey.E)).Bytes()
+		body, _ := json.Marshal(map[string]any{
+			"keys": []map[string]any{
+				{"kty": "RSA", "kid": "k1",
+					"n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+					"e": base64.RawURLEncoding.EncodeToString(eBytes)},
+			},
+		})
+		w.Write(body) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &store.JWKSConfig{
+		ID:        uuid.New(),
+		Name:      "missing-sub-issuer",
+		Issuer:    "https://missing-sub.integration.example.com/",
+		JWKSURL:   srv.URL,
+		Audience:  "https://api.integration.example.com",
+		IsEnabled: true,
+	}
+	if err := jwksStore.Create(ctx, cfg); err != nil {
+		t.Fatalf("seed jwks_configs: %v", err)
+	}
+
+	// Token with everything valid EXCEPT a subject.
+	claims := jwt.RegisteredClaims{
+		Issuer:    cfg.Issuer,
+		Audience:  jwt.ClaimStrings{cfg.Audience},
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tok.Header["kid"] = "k1"
+	tokenStr, err := tok.SignedString(key)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	v := jwks.NewValidator(jwksStore, time.Hour, slog.Default())
+	if _, err := v.ValidateToken(ctx, tokenStr); err == nil {
+		t.Fatal("expected error for token with no sub claim, got nil")
+	}
+}
+
 func TestValidator_Integration_DisabledIssuer(t *testing.T) {
 	db := testutil.NewPostgresPool(t, pgstore.Migrations)
 	jwksStore := pgstore.NewJWKSConfigStore(db)

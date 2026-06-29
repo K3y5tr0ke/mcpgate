@@ -152,3 +152,35 @@ The carry-over harvest surfaced several items already resolved in later sprints.
 ## 8. Sprint 10 deliverable
 
 All security tests pass; OWASP checklist documented with evidence; security headers enforced; performance targets met (p99 ≤ 5ms passthrough, error < 1%); 100% audit-log capture under stress; graceful degradation verified for Postgres, Redis, and upstream failures via automated chaos tests; Playwright E2E running in CI. Carry-over hardening TODOs (RBAC tests, cache invalidation, partitioning, pool metrics, policy pagination, M2M identity) closed.
+
+---
+
+## 9. Post-sprint security review — outcomes & decisions
+
+A 4-dimension security audit (auth/sessions, authz/identity, crypto/secrets, network/input) was run after the main sprint work. Posture was strong; findings were edge/transport hardening. Verified findings fixed in the **security-followups PR**: SSRF redirect-pinning (JWKS validator + rotate), admin request-body limits (1 MiB), M2M rate-limit isolation (per-identity key, not shared `uuid.Nil`), RBAC fail-closed on enforcer error, `ReadHeaderTimeout`, and **npm audit added to `make ci` security-scan** (both ecosystems now gated).
+
+Follow-ups added during PR review of this branch:
+- **M2M tokens now require a `sub` claim** (`internal/auth/jwks/validator.go`). The subject is the client's only stable identity (audit log + per-client rate-limit key); a sub-less token would otherwise collapse into the shared `uuid.Nil` bucket — closing the residual gap in the rate-limit isolation fix above.
+- **`Enforcer.DefaultAllow()` retired** (`internal/auth/rbac/enforcer.go`). The RBAC fail-closed change removed its only caller; with deny enforced unconditionally by the Casbin model (`e = some(where (p.eft == allow))`) and the fail-closed middleware, the `defaultAllow` field was dead. The `rbac.default_action` config key is kept for backward-compat but documented as advisory-only (not honoured).
+
+### Decisions
+
+| Item | Decision |
+|------|----------|
+| **Trusted-proxy-aware client IP** (audit `ClientIP` trusts `X-Forwarded-For`; brute-force keys on `RemoteAddr`) | **Deferred to the load balancer.** When deployed behind an LB/ingress, the LB sets a trusted `X-Forwarded-For`. mcpgate will only add trusted-proxy CIDR parsing if a deployment runs *without* an LB. Re-open if that materializes. |
+| **TLS** (config was defined but unused) | **Resolved.** Direct TLS serving is now wired (`server.tls.enabled` → `ServeTLS`, TLS 1.2 floor); dev certs via `scripts/generate-certs.sh` → `certs/` (gitignored). Production typically still terminates TLS at the LB/ingress; in-process TLS is now available when needed. |
+
+### Low-priority backlog (pick up when convenient)
+
+| Item | Location | Note |
+|------|----------|------|
+| JWT signing-key file-permission check + "prod requires `signing_key_file`" guard | `internal/auth/jwt/manager.go` | reject world-readable key; fail if ephemeral key in prod |
+| Session JWT missing `aud` claim | `internal/auth/jwt/manager.go` | add `Audience` + validate, like M2M tokens |
+| WS `CheckOrigin` always-true + no message-size cap | `internal/admin/api/logs.go` | defense-in-depth (SameSite=Lax already blocks cross-origin cookie) |
+| Unused `AdminConfig.CORSOrigin` | `internal/config/config.go` | implement CORS or remove the dead field |
+| DB password in DSN string | `internal/config/config.go` | ensure DSN is never logged on pgx errors |
+| `generatePassword` modulo bias | `cmd/mcpgate/main.go` | negligible (62 chars); use rejection sampling if ever tightened |
+
+### Confirmed non-issues (audit false positives)
+- "No security headers" — already shipped (task 10.2).
+- "Secrets in `.env` repo history" — `.env` is gitignored and was never committed (verified).

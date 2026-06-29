@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -319,12 +320,17 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 	}
 
 	s.http = &http.Server{
-		Addr:           fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:        s.buildRouter(),
-		ReadTimeout:    cfg.Server.ReadTimeout,
-		WriteTimeout:   cfg.Server.WriteTimeout,
-		IdleTimeout:    cfg.Server.IdleTimeout,
-		MaxHeaderBytes: cfg.Server.MaxHeaderBytes,
+		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler: s.buildRouter(),
+		// Bounds the time to read request headers — defends against slow-header
+		// (slowloris) clients independently of the full-request ReadTimeout.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+		WriteTimeout:      cfg.Server.WriteTimeout,
+		IdleTimeout:       cfg.Server.IdleTimeout,
+		MaxHeaderBytes:    cfg.Server.MaxHeaderBytes,
+		// Enforce a modern TLS floor when serving over TLS (no-op for plaintext).
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 
 	return s, nil
@@ -539,17 +545,29 @@ func (s *Server) Shutdown() {
 // Graceful shutdown waits up to 30 seconds for in-flight requests, then calls
 // Shutdown() to stop background goroutines and drain the audit log pipeline.
 func (s *Server) Run() error {
+	tlsCfg := s.cfg.Server.TLS
+	if tlsCfg.Enabled && (tlsCfg.CertFile == "" || tlsCfg.KeyFile == "") {
+		return fmt.Errorf("server.tls.enabled is true but cert_file/key_file are not set")
+	}
+
 	ln, err := net.Listen("tcp", s.http.Addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", s.http.Addr, err)
 	}
 
-	s.logger.Info("server starting", "addr", s.http.Addr)
+	s.logger.Info("server starting", "addr", s.http.Addr, "tls", tlsCfg.Enabled)
 
 	errCh := make(chan error, 1)
 	go func() {
-		if err := s.http.Serve(ln); err != nil && err != http.ErrServerClosed {
-			errCh <- err
+		var serveErr error
+		if tlsCfg.Enabled {
+			// Cert/key are read from disk; TLS floor is set via http.Server.TLSConfig.
+			serveErr = s.http.ServeTLS(ln, tlsCfg.CertFile, tlsCfg.KeyFile)
+		} else {
+			serveErr = s.http.Serve(ln)
+		}
+		if serveErr != nil && serveErr != http.ErrServerClosed {
+			errCh <- serveErr
 		}
 	}()
 

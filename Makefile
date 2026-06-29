@@ -113,8 +113,13 @@ lint-fix:
 	$(REQUIRE_GOLANGCI_V2)
 	golangci-lint run --fix ./...
 
+# Dependency vulnerability scan for both ecosystems: govulncheck (Go) and
+# npm audit (frontend). Runs in `make ci` (needs network); not in ci-fast.
+# --audit-level=high fails only on high/critical, matching govulncheck's
+# called-vulnerability bar (low/moderate are reported but non-blocking).
 security-scan:
 	$(GVM_GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	$(NVM) cd web && npm audit --audit-level=high
 
 # ── Database migrations ───────────────────────────────────────────────────────
 
@@ -290,7 +295,7 @@ help:
 	@echo "  test-coverage      Generate HTML coverage report"
 	@echo "  lint               Run golangci-lint"
 	@echo "  lint-fix           Run golangci-lint with auto-fix"
-	@echo "  security-scan      Run govulncheck"
+	@echo "  security-scan      Run govulncheck (Go) + npm audit (frontend)"
 	@echo "  migrate-up         Apply all pending migrations"
 	@echo "  migrate-down       Roll back the last migration"
 	@echo "  migrate-create     Create a new migration (name=<suffix>)"

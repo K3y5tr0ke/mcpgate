@@ -31,6 +31,12 @@ func NewClient(url string, ttl time.Duration) *Client {
 		ttl: ttl,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
+			// Do not follow redirects: a JWKS endpoint has no legitimate reason
+			// to 3xx, and following one would let an issuer URL pivot to an
+			// internal address (SSRF). Treat a redirect as the final response.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 		keys: make(map[string]*rsa.PublicKey),
 	}
