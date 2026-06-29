@@ -80,6 +80,39 @@ DATABASE_URL="postgres://mcpgate:devpassword@localhost:5432/mcpgate?sslmode=disa
 migrate -path internal/store/postgres/migrations -database "$DATABASE_URL" up
 info "Migrations applied"
 
+# ── Dev config ────────────────────────────────────────────────────────────────
+# mcpgate.dev.yaml is gitignored (it may hold local secrets), so derive it from
+# the committed example on first setup and point it at the docker dev stack.
+
+DEV_CFG="configs/mcpgate.dev.yaml"
+if [ -f "$DEV_CFG" ]; then
+    info "$DEV_CFG already exists — leaving it as-is"
+else
+    info "Creating $DEV_CFG from mcpgate.example.yaml..."
+    cp configs/mcpgate.example.yaml "$DEV_CFG"
+    # Match the docker-compose dev Postgres (devpassword is the public dev
+    # password from docker-compose.dev.yml; TLS disabled for the local container).
+    # The sed range is scoped to the database: block so Redis's empty password is
+    # left untouched.
+    sed -i.bak \
+        -e '/^database:/,/^[a-zA-Z]/ s/password: ""/password: "devpassword"/' \
+        -e '/^database:/,/^[a-zA-Z]/ s/ssl_mode: "prefer"/ssl_mode: "disable"/' \
+        "$DEV_CFG"
+    rm -f "$DEV_CFG.bak"
+    # Fail loud if the example's format drifted so the sed silently no-ops —
+    # otherwise the dev config would ship with an empty DB password and surface
+    # later as a confusing connection failure.
+    if ! grep -q 'password: "devpassword"' "$DEV_CFG"; then
+        error "Could not set the dev DB password in $DEV_CFG."
+        error "mcpgate.example.yaml's database block format changed — update scripts/setup.sh."
+        rm -f "$DEV_CFG"
+        exit 1
+    fi
+    info "  $DEV_CFG created (gitignored) — adjust for your environment"
+    info "  (derived from mcpgate.example.yaml: only the database section is"
+    info "   patched; all other settings follow the example's defaults)"
+fi
+
 # ── Dev certificates ──────────────────────────────────────────────────────────
 
 info "Generating dev TLS and SAML certificates..."
