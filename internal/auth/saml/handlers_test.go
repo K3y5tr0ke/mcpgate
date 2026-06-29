@@ -80,7 +80,7 @@ func buildSAMLResponse(t *testing.T, idp *cssaml.IdentityProvider, sp *cssaml.Se
 
 	req := &cssaml.IdpAuthnRequest{
 		IDP:         idp,
-		HTTPRequest: httptest.NewRequest(http.MethodPost, "/sso", nil),
+		HTTPRequest: httptest.NewRequest(http.MethodPost, "/sso", http.NoBody),
 		Now:         time.Now(),
 		// Empty request ID → IdP-initiated flow: no InResponseTo in assertion.
 		// The SP has AllowIDPInitiated: true, so ParseResponse accepts it.

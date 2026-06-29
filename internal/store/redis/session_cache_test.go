@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	goredis "github.com/redis/go-redis/v9"
 	"github.com/google/uuid"
+	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 	redisstore "github.com/K3y5tr0ke/mcpgate/internal/store/redis"

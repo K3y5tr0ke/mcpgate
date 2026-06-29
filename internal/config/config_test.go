@@ -24,6 +24,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.Auth.SessionTTL != time.Hour {
 		t.Errorf("default auth.session_ttl: got %v, want %v", cfg.Auth.SessionTTL, time.Hour)
 	}
+	if cfg.Auth.SessionRevalidateInterval != 30*time.Second {
+		t.Errorf("default auth.session_revalidate_interval: got %v, want 30s", cfg.Auth.SessionRevalidateInterval)
+	}
 }
 
 func TestEnvOverride(t *testing.T) {
