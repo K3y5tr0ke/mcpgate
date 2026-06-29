@@ -42,6 +42,24 @@ docker compose -f deployments/docker/docker-compose.dev.yml up -d --wait postgre
 echo "[e2e] applying migrations..."
 migrate -path internal/store/postgres/migrations -database "$DATABASE_URL" up
 
+# configs/mcpgate.dev.yaml is gitignored, so on a clean CI checkout it won't
+# exist. Bootstrap it from the committed example and point it at the docker dev
+# stack (devpassword / ssl_mode disable). Mirrors scripts/setup.sh; scoped to the
+# database section so the empty Redis password is left untouched.
+if [ ! -f "$CONFIG" ]; then
+  echo "[e2e] $CONFIG missing — bootstrapping from mcpgate.example.yaml..."
+  cp configs/mcpgate.example.yaml "$CONFIG"
+  sed -i.bak \
+    -e '/^database:/,/^[a-zA-Z]/ s/password: ""/password: "devpassword"/' \
+    -e '/^database:/,/^[a-zA-Z]/ s/ssl_mode: "prefer"/ssl_mode: "disable"/' \
+    "$CONFIG"
+  rm -f "$CONFIG.bak"
+  grep -q 'password: "devpassword"' "$CONFIG" || {
+    echo "[e2e] config bootstrap failed to set the dev DB password — check mcpgate.example.yaml format."
+    exit 1
+  }
+fi
+
 echo "[e2e] building web assets + binary..."
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 # shellcheck source=/dev/null

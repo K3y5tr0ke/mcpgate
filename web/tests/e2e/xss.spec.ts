@@ -6,7 +6,10 @@ import { test, expect } from '@playwright/test'
 // If the name were ever rendered via dangerouslySetInnerHTML, the injected
 // <img onerror> would fire and set the sentinel — failing this test.
 test('stored XSS payload in a server name is rendered inert', async ({ page }) => {
-  const payload = `<img src=x onerror="window.__xssExecuted=true">`
+  // Server names are unique, so namespace the payload per run; otherwise a
+  // re-run against the same DB would 409 on create. The XSS markup is preserved.
+  const marker = `xss-${Date.now()}`
+  const payload = `<img src=x onerror="window.__xssExecuted=true">${marker}`
 
   // Load a console page first so the admin token is in localStorage.
   await page.goto('/console/dashboard')
@@ -24,17 +27,27 @@ test('stored XSS payload in a server name is rendered inert', async ({ page }) =
     },
   })
   expect(res.status(), 'create server with payload name').toBe(201)
+  const createdId = (await res.json()).id as string
 
-  // Render the page that lists server names.
-  await page.goto('/console/servers')
-  await expect(page.getByRole('heading', { name: 'Servers' })).toBeVisible()
+  try {
+    // Render the page that lists server names.
+    await page.goto('/console/servers')
+    await expect(page.getByRole('heading', { name: 'Servers' })).toBeVisible()
 
-  // The payload must appear as literal, escaped text...
-  await expect(page.locator('body')).toContainText('onerror=')
+    // The payload must appear as literal, escaped text...
+    await expect(page.locator('body')).toContainText('onerror=')
 
-  // ...and must NOT have executed (no element was created from the markup).
-  const executed = await page.evaluate(
-    () => (window as unknown as { __xssExecuted?: boolean }).__xssExecuted === true,
-  )
-  expect(executed, 'XSS payload must not execute').toBe(false)
+    // ...and must NOT have executed (no element was created from the markup).
+    const executed = await page.evaluate(
+      () => (window as unknown as { __xssExecuted?: boolean }).__xssExecuted === true,
+    )
+    expect(executed, 'XSS payload must not execute').toBe(false)
+  } finally {
+    // Clean up so the run is idempotent and leaves no junk upstream behind.
+    if (createdId) {
+      await page.request.delete(`/api/v1/admin/servers/${createdId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    }
+  }
 })
