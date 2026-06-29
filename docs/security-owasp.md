@@ -2,7 +2,7 @@
 
 Sprint 10 task **10.1**. Each OWASP category is mapped to mcpgate's concrete mitigation and the evidence in the codebase. Status legend: **✅ Implemented**, **🟡 Partial / verification pending this sprint**, **⏭ Deferred** (with target sprint).
 
-> Verification suites that *exercise* several of these mitigations are themselves Sprint 10 tasks (10.3 ZAP, 10.4 SQLi, 10.5 XSS, 10.6 JWT, 10.7 SAML, 10.8 privesc). This document is the static checklist; the suites are the dynamic proof.
+> The verification suites that *exercise* these mitigations are now implemented (10.4 SQLi, 10.5 XSS, 10.6 JWT, 10.7 SAML, 10.8 privesc — across the Sprint 10 PRs); **10.3 (OWASP ZAP scan)** is the only one still outstanding. This document is the static checklist; the suites are the dynamic proof.
 
 ---
 
@@ -11,7 +11,7 @@ Sprint 10 task **10.1**. Each OWASP category is mapped to mcpgate's concrete mit
 - `/mcp/{serverName}/*` passes through `rbac.Authorize` (Casbin `(role, server, action)` tuples) — `internal/server/server.go` `buildRouter()`; `internal/auth/rbac/`.
 - `/api/v1/admin/*` requires `rbac.RequireRole("admin")` (`server.go`).
 - No default-allow: a request with no matching policy is denied (403) and audited as `denied` (`tests/e2e/logging_test.go` `TestE2E_AuditLog_RBACDenied_*`).
-- **Sprint 10 follow-up:** 10.8 privilege-escalation suite + S4-T1 RBAC unit tests.
+- **Verified by:** 10.8 privilege-escalation suite — `tests/e2e/rbac_test.go` `TestE2E_RBAC_AdminAPI_NonAdmin_CannotMutate` (+ the RBAC e2e matrix: non-admin/wrong-server/readonly/suspended) — and S4-T1 RBAC unit tests (`internal/auth/rbac/{enforcer,middleware}_test.go`).
 
 ## A02:2021 — Cryptographic Failures — ✅
 **Mitigation:** Strong, modern algorithms throughout; no weak/none algorithms accepted.
@@ -20,14 +20,14 @@ Sprint 10 task **10.1**. Each OWASP category is mapped to mcpgate's concrete mit
 - **SAML** assertion signature verification — `internal/auth/saml/`.
 - **Short-lived access tokens** (default `15m`), refresh `7d`, session `1h` — `internal/config/config.go`.
 - **TLS** termination expected at ingress/in front; HSTS now emitted (`internal/server/security_headers.go`).
-- **Sprint 10 follow-up:** 10.6 JWT security tests (tampered/expired/wrong-iss/none-alg).
+- **Verified by:** 10.6 JWT security tests — `internal/auth/jwt/manager_security_test.go` (none/HS256 algorithm-confusion, role-tamper) plus the existing tampered/expired/wrong-issuer tests.
 
 ## A03:2021 — Injection — ✅
 **Mitigation:** Parameterized SQL everywhere; admin input allowlisting; MCP payloads forwarded verbatim (never interpolated/evaluated).
 - All `pgx` queries use positional params (`$1, $2, …`) — e.g. `internal/store/postgres/audit_logs.go`; no string-built SQL.
 - Settings `PUT` validates keys against a hardcoded allowlist — `internal/admin/api/settings.go`.
 - The proxy forwards raw JSON-RPC bytes; it does not parse-and-rebuild upstream commands.
-- **Sprint 10 follow-up:** 10.4 SQL-injection suite, 10.5 XSS suite, 10.3 ZAP scan.
+- **Verified by:** 10.4 SQL-injection suite (`tests/e2e/sqli_test.go`) and 10.5 stored-XSS test (`web/tests/e2e/xss.spec.ts`, Sprint 10B). **Remaining:** 10.3 OWASP ZAP scan.
 
 ## A04:2021 — Insecure Design — 🟡
 **Mitigation:** Layered middleware chain with a single enforcement order; security-sensitive changes flagged for second review (per `CLAUDE.md` / `README.md`).
@@ -42,9 +42,9 @@ Sprint 10 task **10.1**. Each OWASP category is mapped to mcpgate's concrete mit
 
 ## A06:2021 — Vulnerable and Outdated Components — ✅
 **Mitigation:** Automated dependency scanning in the local CI gate; clean baseline.
-- `make security-scan` runs **govulncheck**; **npm audit** runs in `test-frontend`. Both currently report **0 vulnerabilities** (PRs #2/#3 cleared Go stdlib + x/net + goxmldsig + vite + undici; toolchain on go1.26.4).
+- `make security-scan` runs **govulncheck** *and* **npm audit** (`--audit-level=high`) — both ecosystems gated in `make ci` (npm-audit gating added in the security-review follow-ups). Currently **0 vulnerabilities** (PRs #2/#3 cleared Go stdlib + x/net + goxmldsig + vite + undici; toolchain on go1.26.4).
 - golangci-lint pinned to v2 via a Makefile guard.
-- **Sprint 10 follow-up:** 10.14 Trivy image scan (gated on the Sprint 11 production image).
+- **Remaining:** 10.14 Trivy image scan (gated on the Sprint 11 production image).
 
 ## A07:2021 — Identification and Authentication Failures — ✅
 **Mitigation:** Replay protection, brute-force throttling, short sessions, fresh post-auth session IDs.
@@ -52,7 +52,7 @@ Sprint 10 task **10.1**. Each OWASP category is mapped to mcpgate's concrete mit
 - **Brute-force throttling** (Redis INCR per IP, default window `15m`) on SAML + local login — `internal/config/config.go`, `internal/ratelimit/`.
 - **Short access-token TTL** (`15m`) limits stolen-token window — `config.go`.
 - **Session fixation prevented:** session created only *after* successful auth (no pre-auth session).
-- **Sprint 10 follow-up:** 10.7 SAML security tests (replay/audience/expiry/signature).
+- **Verified by:** 10.7 SAML security tests — `tests/e2e/saml_test.go` `TestE2E_SAML_TamperedAssertion_Rejected` (signature) plus existing replay-detection and suspended-user coverage. (Audience/time-conditions are enforced by crewjam/saml's `ParseResponse`.)
 
 ## A08:2021 — Software and Data Integrity Failures — ✅
 **Mitigation:** Tamper-evident audit log; verifiable without external dependency.
@@ -66,13 +66,13 @@ Sprint 10 task **10.1**. Each OWASP category is mapped to mcpgate's concrete mit
 - Async audit `Pipeline` with a **WAL fallback sink** when Postgres is down + crash-recovery replay — `internal/logging/pipeline.go`, `internal/logging/sinks/wal.go`.
 - Dropped-count exposed as Prometheus gauge `mcpgate_audit_pipeline_dropped_total` and degrades `/ready` — `internal/metrics/collector.go` `RegisterPipelineGauge`.
 - Per-request + per-server metrics timeseries — `internal/metrics/`.
-- **Sprint 10 follow-up:** 10.10 k6 log-pipeline stress (assert 100% capture under load).
+- **Verified by:** 10.10 k6 log-pipeline stress script (`k6/log_pipeline.js`, Sprint 10B) — run against a live stack to assert 100% capture (no silent drops) under load.
 
 ## A10:2021 — Server-Side Request Forgery (SSRF) — ✅
 **Mitigation:** Upstream URLs come only from admin-configured records; no user-controlled URL construction.
 - Proxy targets resolved from the `mcp_servers` table (`internal/store`, `internal/proxy` `ServerStore`); clients address servers by **name**, never URL.
 - The JWKS rotate fetch hits the same admin-configured `jwks_url` the validator already uses — justified `//nolint:gosec` in `internal/admin/api/jwks.go`.
-- **Known hardening gap (tracked):** outbound fetches (JWKS) do not restrict redirects to internal IPs — candidate follow-up covering both the validator and rotate paths.
+- **Resolved:** outbound JWKS fetches (both the validator client and the rotate endpoint) now refuse to follow redirects (`CheckRedirect → ErrUseLastResponse`), so an issuer URL can't 302-pivot to an internal address — security-review follow-ups.
 
 ---
 
@@ -89,6 +89,6 @@ Sprint 10 task **10.1**. Each OWASP category is mapped to mcpgate's concrete mit
 | A07 Auth Failures | ✅ |
 | A08 Data Integrity | ✅ (signing/SBOM → S11) |
 | A09 Logging/Monitoring | ✅ |
-| A10 SSRF | ✅ (redirect-pinning follow-up noted) |
+| A10 SSRF | ✅ (redirect-pinning added) |
 
-All ten categories have a primary mitigation in place. Remaining items are (a) the dynamic verification suites scheduled in Sprint 10 (10.3–10.8, 10.10) and (b) two items deliberately deferred to Sprint 11 packaging (container hardening, image signing/SBOM).
+All ten categories have a primary mitigation in place, and the Sprint 10 verification suites (10.4/10.5/10.6/10.7/10.8) are implemented. Remaining items: (a) **10.3 OWASP ZAP** and **10.14 Trivy** image scan (the latter gated on the Sprint 11 image), and (b) items deliberately deferred to Sprint 11 packaging — container hardening (10.15) and image signing/SBOM.
