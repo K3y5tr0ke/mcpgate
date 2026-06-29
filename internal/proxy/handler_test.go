@@ -36,7 +36,7 @@ func (s *staticServerStore) GetByName(_ context.Context, name string) (*store.MC
 	}
 	return nil, store.ErrNotFound
 }
-func (s *staticServerStore) List(_ context.Context) ([]store.MCPServer, error) { return nil, nil }
+func (s *staticServerStore) List(_ context.Context) ([]store.MCPServer, error)  { return nil, nil }
 func (s *staticServerStore) Update(_ context.Context, _ *store.MCPServer) error { return nil }
 func (s *staticServerStore) Delete(_ context.Context, _ uuid.UUID) error        { return nil }
 func (s *staticServerStore) UpdateTools(_ context.Context, _ uuid.UUID, _ []store.ServerTool) error {

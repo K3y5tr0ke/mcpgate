@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/K3y5tr0ke/mcpgate/internal/auth"
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
 	"github.com/K3y5tr0ke/mcpgate/internal/metrics"
@@ -37,7 +39,13 @@ func Middleware(
 			}
 
 			identity := auth.MustIdentity(r.Context())
+			// M2M tokens have no session and UserID == uuid.Nil, so keying on
+			// UserID would put every machine client in one shared bucket. Key
+			// them by their identity (sub/email) instead so limits are per-client.
 			userKey := identity.UserID.String()
+			if identity.SessionID == uuid.Nil && identity.Email != "" {
+				userKey = "m2m:" + identity.Email
+			}
 
 			limit := store.RateLimit{
 				RPM: cfg.Default.RPM,

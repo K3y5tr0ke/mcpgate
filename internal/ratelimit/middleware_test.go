@@ -180,3 +180,52 @@ func findSubstring(s, sub string) bool {
 	}
 	return false
 }
+
+// keyLimiter records the rate-limit key it was called with.
+type keyLimiter struct{ key string }
+
+func (m *keyLimiter) Allow(_ context.Context, key string, _ store.RateLimit) (store.RateLimitResult, error) {
+	m.key = key
+	return store.RateLimitResult{Allowed: true}, nil
+}
+func (m *keyLimiter) StartConcurrent(_ context.Context, _ string, _ int) (bool, func(), error) {
+	return false, func() {}, nil
+}
+
+// TestMiddleware_M2MIdentity_KeyedByEmail verifies M2M tokens (no session,
+// UserID == uuid.Nil) are rate-limited per identity rather than sharing the
+// single uuid.Nil bucket.
+func TestMiddleware_M2MIdentity_KeyedByEmail(t *testing.T) {
+	lim := &keyLimiter{}
+	mw := ratelimit.Middleware(lim, nil, enabledCfg(10), nil, slog.Default())
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+
+	r := httptest.NewRequest(http.MethodPost, "/mcp/srv/message", http.NoBody)
+	r = r.WithContext(auth.WithIdentity(r.Context(), auth.UserIdentity{
+		UserID: uuid.Nil, SessionID: uuid.Nil, Email: "svc@client.example",
+	}))
+	handler.ServeHTTP(httptest.NewRecorder(), r)
+
+	if lim.key != "m2m:svc@client.example" {
+		t.Errorf("M2M rate-limit key = %q, want m2m:svc@client.example", lim.key)
+	}
+}
+
+// TestMiddleware_SessionIdentity_KeyedByUserID verifies a normal (session) user
+// is still keyed by UserID, not the M2M path.
+func TestMiddleware_SessionIdentity_KeyedByUserID(t *testing.T) {
+	lim := &keyLimiter{}
+	mw := ratelimit.Middleware(lim, nil, enabledCfg(10), nil, slog.Default())
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+
+	uid := uuid.New()
+	r := httptest.NewRequest(http.MethodPost, "/mcp/srv/message", http.NoBody)
+	r = r.WithContext(auth.WithIdentity(r.Context(), auth.UserIdentity{
+		UserID: uid, SessionID: uuid.New(), Email: "user@example.com",
+	}))
+	handler.ServeHTTP(httptest.NewRecorder(), r)
+
+	if lim.key != uid.String() {
+		t.Errorf("session rate-limit key = %q, want %q", lim.key, uid.String())
+	}
+}

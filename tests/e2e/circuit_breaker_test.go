@@ -5,9 +5,12 @@ package e2e_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,5 +83,88 @@ func TestE2E_CircuitBreaker_OpensAfterThreshold(t *testing.T) {
 	msg, _ := errObj["message"].(string)
 	if !strings.Contains(msg, "circuit open") {
 		t.Errorf("expected 'circuit open' in error message, got: %q", msg)
+	}
+}
+
+// TestE2E_CircuitBreaker_RecoversAfterUpstreamHeals verifies the full chaos
+// cycle: a failing upstream trips the breaker open, then once the upstream
+// recovers and the recovery timeout elapses, a half-open probe succeeds and the
+// breaker closes so traffic flows again. (Sprint 10, task 10.13.)
+//
+// The upstream is a toggleable server: while "failing" it hijacks and abruptly
+// closes the connection (a transport error → RecordFailure); when healed it
+// returns a valid JSON-RPC result (→ RecordSuccess).
+func TestE2E_CircuitBreaker_RecoversAfterUpstreamHeals(t *testing.T) {
+	const failureThreshold = 3
+
+	ts := newTestServerWith(t, func(cfg *config.Config) {
+		cfg.Proxy.CircuitBreaker.FailureThreshold = failureThreshold
+		cfg.Proxy.CircuitBreaker.RecoveryTimeout = 1 * time.Second
+		cfg.Proxy.CircuitBreaker.HalfOpenMaxRequests = 1
+	})
+	adminToken := ts.createAdminToken(t)
+
+	var failing atomic.Bool
+	failing.Store(true)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if failing.Load() {
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					_ = conn.Close() // abrupt close → transport error
+					return
+				}
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{}}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	ts.registerMCPServer(t, adminToken, "cb-recover", upstream.URL)
+
+	send := func(id int) *http.Response {
+		return ts.do(t, http.MethodPost, "/mcp/cb-recover/message",
+			bytes.NewReader([]byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"ping"}`, id))),
+			map[string]string{"Authorization": "Bearer " + adminToken, "Content-Type": "application/json"})
+	}
+	// Trip the breaker with failing-upstream requests.
+	for i := 0; i < failureThreshold; i++ {
+		resp := send(i)
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck
+		resp.Body.Close()              //nolint:errcheck
+	}
+
+	openResp := send(100)
+	var openBody map[string]any
+	_ = json.NewDecoder(openResp.Body).Decode(&openBody)
+	openResp.Body.Close() //nolint:errcheck
+	errObj, _ := openBody["error"].(map[string]any)
+	openMsg, _ := errObj["message"].(string)
+	if !strings.Contains(openMsg, "circuit open") {
+		t.Fatal("circuit should be open after threshold failures")
+	}
+
+	// Heal the upstream and wait past the recovery timeout.
+	failing.Store(false)
+	time.Sleep(1200 * time.Millisecond)
+
+	// The half-open probe should reach the healthy upstream, succeed, and close
+	// the breaker. Allow a couple of attempts for the Open→HalfOpen transition.
+	var recovered bool
+	for attempt := 0; attempt < 3; attempt++ {
+		resp := send(200 + attempt)
+		var body map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		resp.Body.Close() //nolint:errcheck
+		if _, ok := body["result"]; ok {
+			recovered = true
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !recovered {
+		t.Error("circuit did not recover after upstream healed")
 	}
 }

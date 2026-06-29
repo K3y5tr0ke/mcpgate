@@ -11,6 +11,35 @@
 
 ---
 
+## 0. Progress (updated 2026-06-28)
+
+The original draft PR #7 was split into two no-overlap PRs: **#8** (`sprint-10-backend-hardening` — security headers, auth/RBAC suites, WS heartbeat, chaos) and **#9** (`sprint-10-tooling-e2e` — k6 load, Playwright-in-CI, axe-core, XSS). A security-review follow-up (**#10**) adds SSRF/body-limit/RBAC-fail-closed/TLS hardening.
+
+| Task | Status | Commit / note |
+|------|--------|---------------|
+| 10.1 OWASP checklist | ✅ done | `docs/security-owasp.md` |
+| 10.2 Security headers | ✅ done | `securityHeaders` middleware + unit/e2e tests |
+| 10.4 SQL-injection suite | ✅ done | `tests/e2e/sqli_test.go` |
+| 10.6 JWT security | ✅ done | alg-confusion (`none`/HS256) + role-tamper |
+| 10.7 SAML security | ✅ done | tampered-assertion (signature) rejection |
+| 10.8 Privilege escalation | ✅ done | non-admin cannot read/mutate admin API |
+| 10.9 / 10.10 k6 load | ✅ scripts authored | `k6/`, `make load-test[-pipeline]` (manual; needs k6 + stack) |
+| 10.13 upstream chaos | ✅ done | breaker open **and** recovery cycle |
+| 10.11 / 10.12 PG/Redis chaos | ✅ logic unit-covered | WAL fallback + rate-limit fail-open; container-kill e2e deferred |
+| 10.14 dependency scan | ✅ govulncheck + npm audit | Trivy image scan → Sprint 11 |
+| S4-T1 RBAC unit tests | ✅ done | Casbin model + `RequireRole` |
+| S9-D3 WS heartbeat | ✅ done | session re-validation on the log stream |
+| **Lint gate hardening** | ✅ done | `.golangci.yml` now lints `-tags=integration` |
+| 10.5 XSS | ✅ done | Playwright `web/tests/e2e/xss.spec.ts` (stored payload rendered inert) |
+| S9-D7 Playwright-in-CI | ✅ done | `scripts/run-playwright.sh` + `make test-e2e` (self-provisioning) |
+| S9-D5 axe-core | ✅ done | `web/tests/e2e/a11y.spec.ts` (serious/critical WCAG 2 A/AA gate) |
+| 10.3 ZAP scan | ⏳ todo | external scanner |
+| 10.15 Docker hardening | ⏭ Sprint 11 | no prod Dockerfile yet |
+
+**Substantive code/test work for the sprint is complete.** The only remaining items are external-tooling integration: **10.3 OWASP ZAP** and **10.14 Trivy** image scan (the latter gated on the Sprint 11 production image).
+
+---
+
 ## 1. Reconciliation against current code
 
 The carry-over harvest surfaced several items already resolved in later sprints. Corrected against the current tree:
@@ -123,3 +152,35 @@ The carry-over harvest surfaced several items already resolved in later sprints.
 ## 8. Sprint 10 deliverable
 
 All security tests pass; OWASP checklist documented with evidence; security headers enforced; performance targets met (p99 ≤ 5ms passthrough, error < 1%); 100% audit-log capture under stress; graceful degradation verified for Postgres, Redis, and upstream failures via automated chaos tests; Playwright E2E running in CI. Carry-over hardening TODOs (RBAC tests, cache invalidation, partitioning, pool metrics, policy pagination, M2M identity) closed.
+
+---
+
+## 9. Post-sprint security review — outcomes & decisions
+
+A 4-dimension security audit (auth/sessions, authz/identity, crypto/secrets, network/input) was run after the main sprint work. Posture was strong; findings were edge/transport hardening. Verified findings fixed in the **security-followups PR**: SSRF redirect-pinning (JWKS validator + rotate), admin request-body limits (1 MiB), M2M rate-limit isolation (per-identity key, not shared `uuid.Nil`), RBAC fail-closed on enforcer error, `ReadHeaderTimeout`, and **npm audit added to `make ci` security-scan** (both ecosystems now gated).
+
+Follow-ups added during PR review of this branch:
+- **M2M tokens now require a `sub` claim** (`internal/auth/jwks/validator.go`). The subject is the client's only stable identity (audit log + per-client rate-limit key); a sub-less token would otherwise collapse into the shared `uuid.Nil` bucket — closing the residual gap in the rate-limit isolation fix above.
+- **`Enforcer.DefaultAllow()` retired** (`internal/auth/rbac/enforcer.go`). The RBAC fail-closed change removed its only caller; with deny enforced unconditionally by the Casbin model (`e = some(where (p.eft == allow))`) and the fail-closed middleware, the `defaultAllow` field was dead. The `rbac.default_action` config key is kept for backward-compat but documented as advisory-only (not honoured).
+
+### Decisions
+
+| Item | Decision |
+|------|----------|
+| **Trusted-proxy-aware client IP** (audit `ClientIP` trusts `X-Forwarded-For`; brute-force keys on `RemoteAddr`) | **Deferred to the load balancer.** When deployed behind an LB/ingress, the LB sets a trusted `X-Forwarded-For`. mcpgate will only add trusted-proxy CIDR parsing if a deployment runs *without* an LB. Re-open if that materializes. |
+| **TLS** (config was defined but unused) | **Resolved.** Direct TLS serving is now wired (`server.tls.enabled` → `ServeTLS`, TLS 1.2 floor); dev certs via `scripts/generate-certs.sh` → `certs/` (gitignored). Production typically still terminates TLS at the LB/ingress; in-process TLS is now available when needed. |
+
+### Low-priority backlog (pick up when convenient)
+
+| Item | Location | Note |
+|------|----------|------|
+| JWT signing-key file-permission check + "prod requires `signing_key_file`" guard | `internal/auth/jwt/manager.go` | reject world-readable key; fail if ephemeral key in prod |
+| Session JWT missing `aud` claim | `internal/auth/jwt/manager.go` | add `Audience` + validate, like M2M tokens |
+| WS `CheckOrigin` always-true + no message-size cap | `internal/admin/api/logs.go` | defense-in-depth (SameSite=Lax already blocks cross-origin cookie) |
+| Unused `AdminConfig.CORSOrigin` | `internal/config/config.go` | implement CORS or remove the dead field |
+| DB password in DSN string | `internal/config/config.go` | ensure DSN is never logged on pgx errors |
+| `generatePassword` modulo bias | `cmd/mcpgate/main.go` | negligible (62 chars); use rejection sampling if ever tightened |
+
+### Confirmed non-issues (audit false positives)
+- "No security headers" — already shipped (task 10.2).
+- "Secrets in `.env` repo history" — `.env` is gitignored and was never committed (verified).

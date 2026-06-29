@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -278,11 +279,26 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 		redis:         redisClient,
 		proxyHandler:  proxyHandler,
 		overrideStore: overrideStore,
-		adminRouter: api.NewRouter(
-			serverStore, samlIDPStore, jwksStore, jwksValidator, roleStore, overrideStore, userStore,
-			auditStore, settingsStore, pipeline, enforcer,
-			proxyHandler, collector, db, redisClient, logger,
-		),
+		adminRouter: api.NewRouter(api.Deps{
+			Servers:       serverStore,
+			IDPs:          samlIDPStore,
+			JWKS:          jwksStore,
+			JWKSValidator: jwksValidator,
+			Roles:         roleStore,
+			Overrides:     overrideStore,
+			Users:         userStore,
+			AuditStore:    auditStore,
+			Settings:      settingsStore,
+			Pipeline:      pipeline,
+			Enforcer:      enforcer,
+			ProxyHandler:  proxyHandler,
+			Collector:     collector,
+			DB:            db,
+			Redis:         redisClient,
+			SessionCache:  sessionCache,
+			Revalidate:    cfg.Auth.SessionRevalidateInterval,
+			Logger:        logger,
+		}),
 		samlHandlers:     samlHandlers,
 		localHandlers:    localHandlers,
 		jwtManager:       jwtManager,
@@ -304,12 +320,17 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 	}
 
 	s.http = &http.Server{
-		Addr:           fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:        s.buildRouter(),
-		ReadTimeout:    cfg.Server.ReadTimeout,
-		WriteTimeout:   cfg.Server.WriteTimeout,
-		IdleTimeout:    cfg.Server.IdleTimeout,
-		MaxHeaderBytes: cfg.Server.MaxHeaderBytes,
+		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler: s.buildRouter(),
+		// Bounds the time to read request headers — defends against slow-header
+		// (slowloris) clients independently of the full-request ReadTimeout.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+		WriteTimeout:      cfg.Server.WriteTimeout,
+		IdleTimeout:       cfg.Server.IdleTimeout,
+		MaxHeaderBytes:    cfg.Server.MaxHeaderBytes,
+		// Enforce a modern TLS floor when serving over TLS (no-op for plaintext).
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 
 	return s, nil
@@ -329,8 +350,10 @@ func (s *Server) buildRouter() http.Handler {
 	r.Get("/ready", s.handleReady)
 	r.Get("/readyz", s.handleReady) // Kubernetes readiness probe alias
 
-	// SAML auth routes — no auth middleware (these ARE the login flow).
+	// SAML auth routes — no auth middleware (these ARE the login flow), but they
+	// are browser-facing, so they carry the same defensive headers as the console.
 	r.Route("/auth/saml", func(r chi.Router) {
+		r.Use(securityHeaders)
 		r.Get("/login", s.samlHandlers.Login)
 		r.Post("/acs", s.samlHandlers.ACS)
 		r.Get("/metadata", s.samlHandlers.Metadata)
@@ -338,7 +361,7 @@ func (s *Server) buildRouter() http.Handler {
 	})
 
 	// Local admin login — no auth middleware.
-	r.Post("/auth/local/login", s.localHandlers.Login)
+	r.With(securityHeaders).Post("/auth/local/login", s.localHandlers.Login)
 
 	// Identity endpoint — auth only, no role required.
 	r.Group(func(r chi.Router) {
@@ -366,8 +389,10 @@ func (s *Server) buildRouter() http.Handler {
 		r.Post("/sse", s.proxyHandler.HandleSSEMessage)
 	})
 
-	// Admin REST API — auth then admin role check (no Casbin).
+	// Admin REST API — security headers → auth → admin role check (no Casbin).
+	// securityHeaders runs first so even 401/403 responses carry the headers.
 	r.Group(func(r chi.Router) {
+		r.Use(securityHeaders)
 		r.Use(s.authMiddleware)
 		r.Use(rbac.RequireRole("admin", s.logger))
 		r.Mount("/api/v1/admin", s.adminRouter.Handler())
@@ -378,9 +403,9 @@ func (s *Server) buildRouter() http.Handler {
 	// The SPA itself redirects unauthenticated users to /auth/saml/login.
 	// r.Mount strips the /console prefix before the handler sees r.URL.Path,
 	// so consoleSPAHandler receives "/dashboard", "/assets/…", etc.
-	r.Mount("/console", consoleSPAHandler())
+	r.With(securityHeaders).Mount("/console", consoleSPAHandler())
 	// Redirect bare /console to /console/dashboard.
-	r.Get("/console", func(w http.ResponseWriter, r *http.Request) {
+	r.With(securityHeaders).Get("/console", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/console/dashboard", http.StatusFound)
 	})
 
@@ -520,17 +545,29 @@ func (s *Server) Shutdown() {
 // Graceful shutdown waits up to 30 seconds for in-flight requests, then calls
 // Shutdown() to stop background goroutines and drain the audit log pipeline.
 func (s *Server) Run() error {
+	tlsCfg := s.cfg.Server.TLS
+	if tlsCfg.Enabled && (tlsCfg.CertFile == "" || tlsCfg.KeyFile == "") {
+		return fmt.Errorf("server.tls.enabled is true but cert_file/key_file are not set")
+	}
+
 	ln, err := net.Listen("tcp", s.http.Addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", s.http.Addr, err)
 	}
 
-	s.logger.Info("server starting", "addr", s.http.Addr)
+	s.logger.Info("server starting", "addr", s.http.Addr, "tls", tlsCfg.Enabled)
 
 	errCh := make(chan error, 1)
 	go func() {
-		if err := s.http.Serve(ln); err != nil && err != http.ErrServerClosed {
-			errCh <- err
+		var serveErr error
+		if tlsCfg.Enabled {
+			// Cert/key are read from disk; TLS floor is set via http.Server.TLSConfig.
+			serveErr = s.http.ServeTLS(ln, tlsCfg.CertFile, tlsCfg.KeyFile)
+		} else {
+			serveErr = s.http.Serve(ln)
+		}
+		if serveErr != nil && serveErr != http.ErrServerClosed {
+			errCh <- serveErr
 		}
 	}()
 
