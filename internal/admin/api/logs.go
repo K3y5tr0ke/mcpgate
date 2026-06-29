@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -183,7 +184,12 @@ func (h *logHandler) stream(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	var filter store.LogFilter
+	// filter is updated by the read goroutine and read by the write loop, so it
+	// must be guarded — concurrent struct access would otherwise be a data race.
+	var (
+		filterMu sync.Mutex
+		filter   store.LogFilter
+	)
 
 	// Read goroutine: accept filter updates from the client.
 	go func() {
@@ -195,17 +201,26 @@ func (h *logHandler) stream(w http.ResponseWriter, r *http.Request) {
 			}
 			var f store.LogFilter
 			if json.Unmarshal(msg, &f) == nil {
+				filterMu.Lock()
 				filter = f
+				filterMu.Unlock()
 			}
 		}
 	}()
 
 	// Write loop: forward matching entries to client.
 	for entry := range ch {
-		if !matchesLogFilter(entry, filter) {
+		filterMu.Lock()
+		f := filter
+		filterMu.Unlock()
+		if !matchesLogFilter(entry, f) {
 			continue
 		}
-		data, _ := json.Marshal(entry)
+		data, err := json.Marshal(entry)
+		if err != nil {
+			h.logger.Warn("ws: marshal audit entry failed", "err", err)
+			continue
+		}
 		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 			return
 		}
