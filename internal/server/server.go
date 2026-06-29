@@ -278,12 +278,26 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool, redisClient 
 		redis:         redisClient,
 		proxyHandler:  proxyHandler,
 		overrideStore: overrideStore,
-		adminRouter: api.NewRouter(
-			serverStore, samlIDPStore, jwksStore, jwksValidator, roleStore, overrideStore, userStore,
-			auditStore, settingsStore, pipeline, enforcer,
-			proxyHandler, collector, db, redisClient,
-			sessionCache, cfg.Auth.SessionRevalidateInterval, logger,
-		),
+		adminRouter: api.NewRouter(api.Deps{
+			Servers:       serverStore,
+			IDPs:          samlIDPStore,
+			JWKS:          jwksStore,
+			JWKSValidator: jwksValidator,
+			Roles:         roleStore,
+			Overrides:     overrideStore,
+			Users:         userStore,
+			AuditStore:    auditStore,
+			Settings:      settingsStore,
+			Pipeline:      pipeline,
+			Enforcer:      enforcer,
+			ProxyHandler:  proxyHandler,
+			Collector:     collector,
+			DB:            db,
+			Redis:         redisClient,
+			SessionCache:  sessionCache,
+			Revalidate:    cfg.Auth.SessionRevalidateInterval,
+			Logger:        logger,
+		}),
 		samlHandlers:     samlHandlers,
 		localHandlers:    localHandlers,
 		jwtManager:       jwtManager,
@@ -330,8 +344,10 @@ func (s *Server) buildRouter() http.Handler {
 	r.Get("/ready", s.handleReady)
 	r.Get("/readyz", s.handleReady) // Kubernetes readiness probe alias
 
-	// SAML auth routes — no auth middleware (these ARE the login flow).
+	// SAML auth routes — no auth middleware (these ARE the login flow), but they
+	// are browser-facing, so they carry the same defensive headers as the console.
 	r.Route("/auth/saml", func(r chi.Router) {
+		r.Use(securityHeaders)
 		r.Get("/login", s.samlHandlers.Login)
 		r.Post("/acs", s.samlHandlers.ACS)
 		r.Get("/metadata", s.samlHandlers.Metadata)
@@ -339,7 +355,7 @@ func (s *Server) buildRouter() http.Handler {
 	})
 
 	// Local admin login — no auth middleware.
-	r.Post("/auth/local/login", s.localHandlers.Login)
+	r.With(securityHeaders).Post("/auth/local/login", s.localHandlers.Login)
 
 	// Identity endpoint — auth only, no role required.
 	r.Group(func(r chi.Router) {

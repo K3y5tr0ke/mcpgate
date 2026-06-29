@@ -25,6 +25,7 @@ func TestSecurityHeaders_SetsAllHeaders(t *testing.T) {
 		"X-Frame-Options":           "DENY",
 		"X-Content-Type-Options":    "nosniff",
 		"Referrer-Policy":           "no-referrer",
+		"Permissions-Policy":        "geolocation=(), microphone=(), camera=(), payment=(), usb=()",
 		"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
 	}
 	for k, v := range want {

@@ -39,46 +39,51 @@ type Router struct {
 	logger        *slog.Logger
 }
 
-// NewRouter creates an admin API Router wired to the given stores.
-func NewRouter(
-	servers store.ServerStore,
-	idps store.SAMLIDPConfigStore,
-	jwks store.JWKSConfigStore,
-	jwksValidator *jwkspkg.Validator,
-	roles store.RoleStore,
-	overrides store.RateLimitOverrideStore,
-	users store.UserStore,
-	auditStore store.AuditLogStore,
-	settings store.SettingsStore,
-	pipeline *logging.Pipeline,
-	enforcer *rbac.Enforcer,
-	proxyHandler *proxy.Handler,
-	collector metricsProvider,
-	db *pgxpool.Pool,
-	redis *goredis.Client,
-	sessionCache store.SessionCache,
-	revalidate time.Duration,
-	logger *slog.Logger,
-) *Router {
+// Deps holds the dependencies for the admin API router. Using a struct (rather
+// than a long positional parameter list) keeps call sites readable and prevents
+// argument-order mistakes as the dependency set grows.
+type Deps struct {
+	Servers       store.ServerStore
+	IDPs          store.SAMLIDPConfigStore
+	JWKS          store.JWKSConfigStore
+	JWKSValidator *jwkspkg.Validator
+	Roles         store.RoleStore
+	Overrides     store.RateLimitOverrideStore
+	Users         store.UserStore
+	AuditStore    store.AuditLogStore
+	Settings      store.SettingsStore
+	Pipeline      *logging.Pipeline
+	Enforcer      *rbac.Enforcer
+	ProxyHandler  *proxy.Handler
+	Collector     metricsProvider
+	DB            *pgxpool.Pool
+	Redis         *goredis.Client
+	SessionCache  store.SessionCache
+	Revalidate    time.Duration // WS session re-validation interval
+	Logger        *slog.Logger
+}
+
+// NewRouter creates an admin API Router wired to the given dependencies.
+func NewRouter(d Deps) *Router {
 	return &Router{
-		servers:       servers,
-		idps:          idps,
-		jwks:          jwks,
-		jwksValidator: jwksValidator,
-		roles:         roles,
-		overrides:     overrides,
-		users:         users,
-		auditStore:    auditStore,
-		settings:      settings,
-		pipeline:      pipeline,
-		enforcer:      enforcer,
-		proxyHandler:  proxyHandler,
-		collector:     collector,
-		db:            db,
-		redis:         redis,
-		sessionCache:  sessionCache,
-		revalidate:    revalidate,
-		logger:        logger,
+		servers:       d.Servers,
+		idps:          d.IDPs,
+		jwks:          d.JWKS,
+		jwksValidator: d.JWKSValidator,
+		roles:         d.Roles,
+		overrides:     d.Overrides,
+		users:         d.Users,
+		auditStore:    d.AuditStore,
+		settings:      d.Settings,
+		pipeline:      d.Pipeline,
+		enforcer:      d.Enforcer,
+		proxyHandler:  d.ProxyHandler,
+		collector:     d.Collector,
+		db:            d.DB,
+		redis:         d.Redis,
+		sessionCache:  d.SessionCache,
+		revalidate:    d.Revalidate,
+		logger:        d.Logger,
 	}
 }
 
