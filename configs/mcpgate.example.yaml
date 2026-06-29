@@ -11,6 +11,8 @@ server:
     # Serve HTTPS directly. Often left false in production when TLS terminates at
     # the ingress/load balancer; enable for direct TLS. Dev certs come from
     # `scripts/generate-certs.sh` (output in certs/, gitignored). TLS floor is 1.2.
+    # Note: cert/key are read at startup — a renewed cert needs a restart
+    # (no in-process hot-reload).
     enabled: false
     cert_file: ""    # e.g. certs/tls.crt
     key_file: ""     # e.g. certs/tls.key

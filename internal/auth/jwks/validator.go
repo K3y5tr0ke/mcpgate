@@ -133,6 +133,13 @@ func (v *Validator) ValidateToken(ctx context.Context, tokenStr string) (*auth.U
 		}
 	}
 
+	// A subject is required: it is the M2M client's only stable identity, used
+	// for the audit log and as the per-client rate-limit key. Without it, every
+	// sub-less token would collapse into one shared identity / rate-limit bucket.
+	if claims.Subject == "" {
+		return nil, fmt.Errorf("jwks: token missing required sub claim")
+	}
+
 	roles := claims.Permissions
 	if roles == nil {
 		roles = []string{}

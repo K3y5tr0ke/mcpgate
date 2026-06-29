@@ -43,11 +43,10 @@ type PolicyRule struct {
 
 // Enforcer wraps a Casbin enforcer with a PolicyCache for fast decision lookups.
 type Enforcer struct {
-	e            *casbin.Enforcer
-	cache        store.PolicyCache
-	cacheTTL     time.Duration
-	defaultAllow bool
-	logger       *slog.Logger
+	e        *casbin.Enforcer
+	cache    store.PolicyCache
+	cacheTTL time.Duration
+	logger   *slog.Logger
 }
 
 // NewEnforcer creates an Enforcer backed by Postgres (via the pgx adapter) and
@@ -87,11 +86,10 @@ func NewEnforcer(
 	}
 
 	return &Enforcer{
-		e:            e,
-		cache:        cache,
-		cacheTTL:     cacheTTL,
-		defaultAllow: cfg.DefaultAction == "allow",
-		logger:       logger,
+		e:        e,
+		cache:    cache,
+		cacheTTL: cacheTTL,
+		logger:   logger,
 	}, nil
 }
 
@@ -133,9 +131,6 @@ func (e *Enforcer) Enforce(ctx context.Context, roles []string, serverName, acti
 	}
 	return false, nil
 }
-
-// DefaultAllow reports the configured default action when no policy matches.
-func (e *Enforcer) DefaultAllow() bool { return e.defaultAllow }
 
 // ReloadPolicy reloads rules from Postgres and invalidates the decision cache.
 // Must be called after any policy mutation.

@@ -159,6 +159,10 @@ All security tests pass; OWASP checklist documented with evidence; security head
 
 A 4-dimension security audit (auth/sessions, authz/identity, crypto/secrets, network/input) was run after the main sprint work. Posture was strong; findings were edge/transport hardening. Verified findings fixed in the **security-followups PR**: SSRF redirect-pinning (JWKS validator + rotate), admin request-body limits (1 MiB), M2M rate-limit isolation (per-identity key, not shared `uuid.Nil`), RBAC fail-closed on enforcer error, `ReadHeaderTimeout`, and **npm audit added to `make ci` security-scan** (both ecosystems now gated).
 
+Follow-ups added during PR review of this branch:
+- **M2M tokens now require a `sub` claim** (`internal/auth/jwks/validator.go`). The subject is the client's only stable identity (audit log + per-client rate-limit key); a sub-less token would otherwise collapse into the shared `uuid.Nil` bucket — closing the residual gap in the rate-limit isolation fix above.
+- **`Enforcer.DefaultAllow()` retired** (`internal/auth/rbac/enforcer.go`). The RBAC fail-closed change removed its only caller; with deny enforced unconditionally by the Casbin model (`e = some(where (p.eft == allow))`) and the fail-closed middleware, the `defaultAllow` field was dead. The `rbac.default_action` config key is kept for backward-compat but documented as advisory-only (not honoured).
+
 ### Decisions
 
 | Item | Decision |
@@ -173,7 +177,6 @@ A 4-dimension security audit (auth/sessions, authz/identity, crypto/secrets, net
 | JWT signing-key file-permission check + "prod requires `signing_key_file`" guard | `internal/auth/jwt/manager.go` | reject world-readable key; fail if ephemeral key in prod |
 | Session JWT missing `aud` claim | `internal/auth/jwt/manager.go` | add `Audience` + validate, like M2M tokens |
 | WS `CheckOrigin` always-true + no message-size cap | `internal/admin/api/logs.go` | defense-in-depth (SameSite=Lax already blocks cross-origin cookie) |
-| `Permissions-Policy` header not set | `internal/server/security_headers.go` | add to the security-headers middleware |
 | Unused `AdminConfig.CORSOrigin` | `internal/config/config.go` | implement CORS or remove the dead field |
 | DB password in DSN string | `internal/config/config.go` | ensure DSN is never logged on pgx errors |
 | `generatePassword` modulo bias | `cmd/mcpgate/main.go` | negligible (62 chars); use rejection sampling if ever tightened |
