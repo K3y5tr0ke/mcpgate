@@ -1,23 +1,28 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"github.com/K3y5tr0ke/mcpgate/internal/auth"
 	"github.com/K3y5tr0ke/mcpgate/internal/logging"
 	"github.com/K3y5tr0ke/mcpgate/internal/store"
 )
 
 type logHandler struct {
-	store    store.AuditLogStore
-	pipeline *logging.Pipeline
-	logger   *slog.Logger
+	store        store.AuditLogStore
+	pipeline     *logging.Pipeline
+	sessionCache store.SessionCache
+	revalidate   time.Duration // how often the WS stream re-checks session liveness
+	logger       *slog.Logger
 }
 
 var wsUpgrader = websocket.Upgrader{
@@ -144,7 +149,47 @@ func (h *logHandler) stream(w http.ResponseWriter, r *http.Request) {
 	ch, cancel := h.pipeline.Subscribe(connID, 256)
 	defer cancel()
 
-	var filter store.LogFilter
+	// Session re-validation heartbeat: the auth middleware only runs at upgrade,
+	// so a session revoked while the socket is open would otherwise stay
+	// connected. Periodically re-check liveness (the same sessionCache.Get the
+	// auth middleware uses) and close the socket if the session is gone. M2M
+	// tokens have no session (SessionID == Nil) and are skipped.
+	if identity := auth.IdentityFromContextOrZero(r.Context()); identity.SessionID != uuid.Nil && h.sessionCache != nil {
+		interval := h.revalidate
+		if interval <= 0 {
+			interval = 30 * time.Second
+		}
+		done := make(chan struct{})
+		defer close(done)
+		//nolint:gosec // G118: deliberately not the request context — it is
+		// canceled by the WebSocket hijack, which would falsely read as revocation.
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					// Use a background context — the request context may be
+					// canceled by the WS hijack, which must not read as revocation.
+					if _, err := h.sessionCache.Get(context.Background(), identity.SessionID); err != nil {
+						h.logger.Info("ws: session revoked mid-stream, closing", "session_id", identity.SessionID)
+						cancel()
+						_ = conn.Close()
+						return
+					}
+				}
+			}
+		}()
+	}
+
+	// filter is updated by the read goroutine and read by the write loop, so it
+	// must be guarded — concurrent struct access would otherwise be a data race.
+	var (
+		filterMu sync.Mutex
+		filter   store.LogFilter
+	)
 
 	// Read goroutine: accept filter updates from the client.
 	go func() {
@@ -156,17 +201,26 @@ func (h *logHandler) stream(w http.ResponseWriter, r *http.Request) {
 			}
 			var f store.LogFilter
 			if json.Unmarshal(msg, &f) == nil {
+				filterMu.Lock()
 				filter = f
+				filterMu.Unlock()
 			}
 		}
 	}()
 
 	// Write loop: forward matching entries to client.
 	for entry := range ch {
-		if !matchesLogFilter(entry, filter) {
+		filterMu.Lock()
+		f := filter
+		filterMu.Unlock()
+		if !matchesLogFilter(entry, f) {
 			continue
 		}
-		data, _ := json.Marshal(entry)
+		data, err := json.Marshal(entry)
+		if err != nil {
+			h.logger.Warn("ws: marshal audit entry failed", "err", err)
+			continue
+		}
 		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 			return
 		}

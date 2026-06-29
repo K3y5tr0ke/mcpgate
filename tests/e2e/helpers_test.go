@@ -145,7 +145,7 @@ func (ts *testServer) buildSAMLResponse(t *testing.T, idp *cssaml.IdentityProvid
 
 	req := &cssaml.IdpAuthnRequest{
 		IDP:                     idp,
-		HTTPRequest:             httptest.NewRequest(http.MethodPost, "/sso", nil),
+		HTTPRequest:             httptest.NewRequest(http.MethodPost, "/sso", http.NoBody),
 		Now:                     time.Now(),
 		Request:                 cssaml.AuthnRequest{ID: "_e2e-" + uuid.New().String()},
 		ServiceProviderMetadata: spMeta,

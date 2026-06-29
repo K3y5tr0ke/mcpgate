@@ -41,7 +41,7 @@ func TestValidator_Integration_EndToEnd(t *testing.T) {
 				{
 					"kty": "RSA",
 					"kid": "k1",
-					"n":   base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes()),
+					"n":   base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
 					"e":   base64.RawURLEncoding.EncodeToString(eBytes),
 				},
 			},
@@ -116,7 +116,7 @@ func TestValidator_Integration_DisabledIssuer(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"keys": []map[string]any{
 				{"kty": "RSA", "kid": "k1",
-					"n": base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes()),
+					"n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
 					"e": base64.RawURLEncoding.EncodeToString(eBytes)},
 			},
 		})

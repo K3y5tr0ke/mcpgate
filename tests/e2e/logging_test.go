@@ -392,7 +392,10 @@ func newJSONReader(b []byte) io.Reader {
 	return newBytesReader(b)
 }
 
-type bytesReader struct{ data []byte; pos int }
+type bytesReader struct {
+	data []byte
+	pos  int
+}
 
 func newBytesReader(b []byte) *bytesReader { return &bytesReader{data: b} }
 
