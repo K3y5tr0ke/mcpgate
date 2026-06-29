@@ -18,12 +18,13 @@ MIGRATIONS  := internal/store/postgres/migrations
 BIN         := bin/mcpgate
 
 .PHONY: build build-web build-docker build-examples dev dev-frontend \
-        test-unit test-integration test-frontend test-e2e-playwright test-coverage \
+        test-unit test-integration test-frontend test-e2e-playwright test-e2e test-coverage \
         lint lint-fix security-scan \
         migrate-up migrate-down migrate-create \
         docker-up docker-down docker-up-examples \
         ci ci-fast ci-services \
-        seed seed-idp reset-audit-log seed-examples smoke-examples call-examples setup-dev stop clean install-hooks help
+        seed seed-idp reset-audit-log seed-examples smoke-examples call-examples \
+        load-test load-test-pipeline setup-dev stop clean install-hooks help
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -70,10 +71,16 @@ test-integration:
 test-frontend:
 	$(NVM) cd web && npm run lint && npm run test
 
-# Playwright E2E — needs a running stack (server + Postgres + Redis). NOT in
-# ci-fast; invoked by the ci pipeline / a dedicated CI job against docker-compose.
+# Playwright E2E against an ALREADY-RUNNING stack (server + Postgres + Redis).
+# For the self-provisioning, CI-callable variant use `make test-e2e`.
 test-e2e-playwright:
 	$(NVM) cd web && npx playwright test --project=chromium
+
+# Full self-provisioning Playwright E2E (S9-D7, "Playwright in CI"):
+# services → migrate → build → seed (captures admin password) → serve →
+# health-wait → playwright → teardown. This is what a CI job invokes.
+test-e2e:
+	bash scripts/run-playwright.sh
 
 test-coverage:
 	$(GVM_GO) test -race -coverprofile=coverage.out -covermode=atomic ./internal/...
@@ -205,6 +212,22 @@ call-examples:
 	fi
 	MCPGATE_TOKEN=$(MCPGATE_TOKEN) bash examples/call-example-tools.sh
 
+# ── Load tests (k6) ────────────────────────────────────────────────────────────
+# Require k6 (brew install k6), MCPGATE_TOKEN, a running mcpgate, and a reachable
+# registered upstream (make docker-up-examples && make seed-examples). See k6/README.md.
+
+# 10.9 — proxy throughput: ramp 100→1000 req/s; asserts p95<50ms, p99<100ms, <1% errors.
+load-test:
+	@command -v k6 >/dev/null 2>&1 || { echo "k6 not found (brew install k6)."; exit 1; }
+	@if [ -z "$(MCPGATE_TOKEN)" ]; then echo "MCPGATE_TOKEN is required."; exit 1; fi
+	k6 run -e MCPGATE_TOKEN=$(MCPGATE_TOKEN) k6/proxy_throughput.js
+
+# 10.10 — audit-log pipeline under stress: 1000 req/s for 10m (~600k entries).
+load-test-pipeline:
+	@command -v k6 >/dev/null 2>&1 || { echo "k6 not found (brew install k6)."; exit 1; }
+	@if [ -z "$(MCPGATE_TOKEN)" ]; then echo "MCPGATE_TOKEN is required."; exit 1; fi
+	k6 run -e MCPGATE_TOKEN=$(MCPGATE_TOKEN) k6/log_pipeline.js
+
 # Full first-time dev environment setup.
 # Starts services, applies migrations, seeds DB + IdP, then starts servers.
 setup-dev:
@@ -263,6 +286,7 @@ help:
 	@echo "  dev-all            Start Docker services + backend + frontend"
 	@echo "  test-unit          Run unit tests (no external services)"
 	@echo "  test-integration   Run integration tests (requires Postgres + Redis)"
+	@echo "  test-e2e           Self-provisioning Playwright E2E (services+seed+serve+run)"
 	@echo "  test-coverage      Generate HTML coverage report"
 	@echo "  lint               Run golangci-lint"
 	@echo "  lint-fix           Run golangci-lint with auto-fix"
@@ -282,6 +306,8 @@ help:
 	@echo "  seed-examples      Register example MCP servers via admin API (needs MCPGATE_TOKEN)"
 	@echo "  smoke-examples     Register + probe example MCP servers with tools/list (needs MCPGATE_TOKEN)"
 	@echo "  call-examples      Invoke tools/resources/prompts on each server via the proxy (needs MCPGATE_TOKEN)"
+	@echo "  load-test          k6 proxy throughput load test (needs k6 + MCPGATE_TOKEN)"
+	@echo "  load-test-pipeline k6 audit-log pipeline stress test (needs k6 + MCPGATE_TOKEN)"
 	@echo "  setup-dev          Full first-time setup: services + migrate + seed + seed-idp + start"
 	@echo "  stop               Kill the running mcpgate server (ports 8080 + 9090)"
 	@echo "  clean              Remove build artifacts"

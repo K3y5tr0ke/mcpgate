@@ -15,7 +15,9 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
-    { name: 'setup', testMatch: '**/auth.setup.ts' },
+    // The setup project CREATES the storageState file, so it must not try to
+    // LOAD it (it is gitignored and absent on a clean CI checkout).
+    { name: 'setup', testMatch: '**/auth.setup.ts', use: { storageState: undefined } },
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
