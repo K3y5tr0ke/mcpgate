@@ -143,6 +143,7 @@ func (t *Stdio) ensureRunning() error {
 		return nil
 	}
 
+	// nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd := exec.Command(t.command, t.args...) //nolint:gosec
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
