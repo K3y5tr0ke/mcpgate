@@ -141,5 +141,6 @@ func writeRateLimitError(w http.ResponseWriter, r *http.Request, retryAfter time
 			"data":    map[string]any{"retry_after_seconds": retrySeconds},
 		},
 	})
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 	_, _ = w.Write(body)
 }

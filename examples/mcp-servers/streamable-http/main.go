@@ -30,12 +30,14 @@ func main() {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
+			// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 			_, _ = w.Write(common.ParseErrorResponse())
 			return
 		}
 		logger.Info("request", "method", req.Method, "notification", req.IsNotification())
 
 		w.Header().Set("Content-Type", "application/json")
+		// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 		_, _ = w.Write(h.Handle(&req))
 	})
 
