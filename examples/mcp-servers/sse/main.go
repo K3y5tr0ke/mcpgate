@@ -34,6 +34,7 @@ func main() {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
+			// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", common.ParseErrorResponse())
 			return
 		}
@@ -43,6 +44,7 @@ func main() {
 		w.Header().Set("Cache-Control", "no-cache")
 
 		resp := h.Handle(&req)
+		// nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", resp)
 	})
 

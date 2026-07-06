@@ -7,8 +7,9 @@ export function LocalLoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const redirectTo =
-    new URLSearchParams(window.location.search).get('redirect_to') ?? '/console/dashboard'
+  const raw = new URLSearchParams(window.location.search).get('redirect_to') ?? ''
+  // Reject absolute URLs and protocol-relative paths (//evil.com) to prevent open redirect.
+  const redirectTo = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/console/dashboard'
 
   async function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault()

@@ -108,7 +108,8 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	// Embed the AuthnRequest ID in RelayState as "<id>|<redirect_to>" so ACS can
 	// validate InResponseTo without a separate cookie (avoids SameSite=None requirement).
 	redirectTo := r.URL.Query().Get("redirect_to")
-	if redirectTo == "" {
+	// Reject absolute URLs and protocol-relative paths to prevent open redirect via relayState.
+	if redirectTo == "" || !strings.HasPrefix(redirectTo, "/") || strings.HasPrefix(redirectTo, "//") {
 		redirectTo = "/console/dashboard"
 	}
 	relayState := authReq.ID + "|" + redirectTo
@@ -120,6 +121,7 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// nosemgrep: go.lang.security.injection.open-redirect.open-redirect
 	http.Redirect(w, r, redirectURL.String(), http.StatusFound) //nolint:gosec // G710: IdP SSO URL from admin-configured metadata, not user input
 }
 
@@ -167,7 +169,7 @@ func (h *Handlers) ACS(w http.ResponseWriter, r *http.Request) {
 	if rs := r.FormValue("RelayState"); rs != "" {
 		if idx := strings.Index(rs, "|"); idx >= 0 {
 			possibleRequestIDs = []string{rs[:idx]}
-			if dest := rs[idx+1:]; strings.HasPrefix(dest, "/") {
+			if dest := rs[idx+1:]; strings.HasPrefix(dest, "/") && !strings.HasPrefix(dest, "//") {
 				redirectTo = dest
 			}
 		}
@@ -309,7 +311,9 @@ func (h *Handlers) Metadata(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/samlmetadata+xml")
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 	_, _ = w.Write([]byte(xml.Header))
+	// nosemgrep: go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
 	_, _ = w.Write(out)
 }
 
