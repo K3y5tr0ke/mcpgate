@@ -2,6 +2,7 @@ package tracing
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 
@@ -16,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/K3y5tr0ke/mcpgate/internal/config"
@@ -46,6 +48,10 @@ func New(cfg config.OTLPConfig, serviceName string) (*Provider, error) {
 	opts := []grpc.DialOption{}
 	if cfg.Insecure {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	} else {
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			MinVersion: tls.VersionTLS12,
+		})))
 	}
 	// grpc.NewClient is the modern, non-blocking constructor.
 	conn, err := grpc.NewClient(cfg.Endpoint, opts...)
