@@ -1516,7 +1516,7 @@ All HTTP handlers are wrapped in a recovery middleware that catches panics, logs
 
 8. **High availability.** Is active-active HA required for v1, or is a single-instance deployment with automated restart (Kubernetes) sufficient? Active-active would require leader election for background jobs (log retention, health checks).
 
-9. **Licensing and distribution.** Will mcpgate be open-source, source-available, or proprietary? This affects dependency selection (some Go libraries have copyleft licenses).
+9. ~~**Licensing and distribution.** Will mcpgate be open-source, source-available, or proprietary? This affects dependency selection (some Go libraries have copyleft licenses).~~ **Resolved:** open-source under Apache-2.0 (see `LICENSE`). New dependencies must be Apache-2.0-compatible (no GPL/AGPL).
 
 ---
 

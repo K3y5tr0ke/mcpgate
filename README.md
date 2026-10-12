@@ -438,4 +438,6 @@ invokes `$HOME/.gvm/gos/go1.26.4/bin/go` directly — no PATH manipulation requi
 
 ## License
 
-TBD
+Copyright 2026 Sai Prathik S.B.
+
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
